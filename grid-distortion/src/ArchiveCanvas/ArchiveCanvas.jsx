@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './ArchiveCanvas.css';
 
-const GAP = 6;
+const GAP = 10;
 const BLOCK_WIDTH = Math.round(window.innerWidth * 0.3);
 const BLOCK_HEIGHT = Math.round(window.innerHeight * 0.7);
 
@@ -165,6 +165,8 @@ export default function ArchiveCanvas() {
       s.lastY = pos.y;
       s.vx = 0;
       s.vy = 0;
+      s.dragStartX = pos.x;
+      s.dragStartY = pos.y;
     };
 
     const onMove = e => {
@@ -212,10 +214,10 @@ export default function ArchiveCanvas() {
 
     const onUp = e => {
       const pos = getPos(e);
-      const moved = Math.abs(pos.x - s.lastX) + Math.abs(pos.y - s.lastY);
+      const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
       s.dragging = false;
 
-      if (moved < 5 && s.hoveredSlug) {
+      if (moved < 8 && s.hoveredSlug) {
         window.location.href = `/archive/${s.hoveredSlug}`;
       }
     };
