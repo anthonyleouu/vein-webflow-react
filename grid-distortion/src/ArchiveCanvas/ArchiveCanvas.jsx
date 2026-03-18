@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
-import GradualBlur from '../GradualBlur/GradualBlur';
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
@@ -8,7 +7,6 @@ const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
 
 export default function ArchiveCanvas() {
   const canvasRef = useRef(null);
-  const videoRef = useRef(null);
   const stateRef = useRef({
     x: 0, y: 0,
     vx: 0, vy: 0,
@@ -25,18 +23,99 @@ export default function ArchiveCanvas() {
     hoveredSlug: null,
     _locked: false,
   });
-  const [cursorLabel, setCursorLabel] = useState('DRAG OR CLICK');
-  const [cursorPos, setCursorPos] = useState({ x: -200, y: -200 });
-  const [loading, setLoading] = useState(true);
-  const [activeItem, setActiveItem] = useState(null);
-  const [panelVisible, setPanelVisible] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+
+  // Inject overlay HTML directly into DOM — bypasses React state entirely
+  useEffect(() => {
+    const overlay = document.createElement('div');
+    overlay.id = 'archive-detail-overlay';
+    overlay.innerHTML = `
+      <div id="archive-detail-media"></div>
+      <div id="archive-detail-panel">
+        <div id="archive-detail-inner">
+          <p id="archive-detail-category">ARCHIVE</p>
+          <h2 id="archive-detail-title"></h2>
+          <p id="archive-detail-creator"></p>
+          <p id="archive-detail-description"></p>
+          <button id="archive-detail-close">CLOSE</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const closeBtn = document.getElementById('archive-detail-close');
+    closeBtn.addEventListener('click', () => {
+      overlay.classList.remove('visible');
+      const panel = document.getElementById('archive-detail-panel');
+      const media = document.getElementById('archive-detail-media');
+      panel.classList.remove('visible');
+      media.classList.remove('visible');
+      setTimeout(() => {
+        stateRef.current._locked = false;
+        // Clear video if any
+        const video = media.querySelector('video');
+        if (video) { video.pause(); video.src = ''; }
+        media.innerHTML = '';
+      }, 700);
+    });
+
+    return () => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    };
+  }, []);
+
+  const openItem = (item) => {
+    const overlay = document.getElementById('archive-detail-overlay');
+    const media = document.getElementById('archive-detail-media');
+    const panel = document.getElementById('archive-detail-panel');
+    const title = document.getElementById('archive-detail-title');
+    const creator = document.getElementById('archive-detail-creator');
+    const description = document.getElementById('archive-detail-description');
+    if (!overlay) return;
+
+    // Populate content
+    title.textContent = item.name || '';
+    creator.textContent = item.creator || '';
+    description.textContent = item.description || '';
+    creator.style.display = item.creator ? 'block' : 'none';
+    description.style.display = item.description ? 'block' : 'none';
+
+    // Set media
+    media.innerHTML = '';
+    if (item.video) {
+      const video = document.createElement('video');
+      video.src = item.video;
+      video.autoplay = true;
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.className = 'archive-detail-video';
+      media.appendChild(video);
+    } else if (item.image) {
+      const img = document.createElement('img');
+      img.src = item.image;
+      img.alt = item.name;
+      img.className = 'archive-detail-image';
+      media.appendChild(img);
+    }
+
+    // Check mobile
+    const isMobile = window.innerWidth < 1024;
+    overlay.className = isMobile ? 'mobile' : '';
+
+    // Trigger animation
+    overlay.classList.add('visible');
+    setTimeout(() => {
+      media.classList.add('visible');
+      panel.classList.add('visible');
+    }, 50);
+  };
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    const handler = (e) => openItem(e.detail);
+    window.addEventListener('archive:open', handler);
+    return () => window.removeEventListener('archive:open', handler);
   }, []);
 
   useEffect(() => {
@@ -59,55 +138,18 @@ export default function ArchiveCanvas() {
           }))
         );
         stateRef.current.images = imageMap;
-        setLoading(false);
+
+        // Remove loading state
+        const wrapper = document.querySelector('.archive-canvas-wrapper');
+        if (wrapper) wrapper.classList.remove('is-loading');
       } catch (err) {
         console.error('Failed to fetch archive:', err);
-        setLoading(false);
       }
     }
     fetchArchive();
   }, []);
 
-  const openItem = (item) => {
-    setActiveItem(item);
-    setTimeout(() => setPanelVisible(true), 50);
-  };
-
-  const closeItem = () => {
-    setPanelVisible(false);
-    setTimeout(() => {
-      setActiveItem(null);
-      stateRef.current._locked = false;
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.src = '';
-      }
-    }, 600);
-  };
-
-  // Bridge between canvas and React state
   useEffect(() => {
-  const handler = (e) => {
-    const item = e.detail;
-    console.log('Handler received:', item.name);
-    setActiveItem(prev => {
-      console.log('setActiveItem called, prev:', prev);
-      return item;
-    });
-  };
-  window.addEventListener('archive:open', handler);
-  return () => window.removeEventListener('archive:open', handler);
-}, []);
-
-useEffect(() => {
-  if (activeItem) {
-    console.log('activeItem changed to:', activeItem.name);
-    setTimeout(() => setPanelVisible(true), 50);
-  }
-}, [activeItem]);
-
-  useEffect(() => {
-    if (loading) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -239,12 +281,10 @@ useEffect(() => {
     drawFrame();
 
     const getPos = e => {
-      if (e.touches && e.touches.length > 0) {
+      if (e.touches && e.touches.length > 0)
         return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }
-      if (e.changedTouches && e.changedTouches.length > 0) {
+      if (e.changedTouches && e.changedTouches.length > 0)
         return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-      }
       return { x: e.clientX, y: e.clientY };
     };
 
@@ -265,7 +305,9 @@ useEffect(() => {
     const onMove = e => {
       if (s._locked) return;
       const pos = getPos(e);
-      setCursorPos({ x: pos.x, y: pos.y });
+
+      // Update cursor label via DOM
+      const cursorEl = document.querySelector('.archive-cursor-label');
 
       if (s.dragging) {
         s.vx = pos.x - s.lastX;
@@ -297,12 +339,19 @@ useEffect(() => {
         }
 
         if (found) {
-          setCursorLabel(found.name.toUpperCase());
+          if (cursorEl) cursorEl.textContent = found.name.toUpperCase();
           s.hoveredSlug = found.slug;
         } else {
-          setCursorLabel('DRAG OR CLICK');
+          if (cursorEl) cursorEl.textContent = 'DRAG OR CLICK';
           s.hoveredSlug = null;
         }
+      }
+
+      // Move cursor via DOM
+      const cursor = document.querySelector('.archive-cursor');
+      if (cursor) {
+        cursor.style.left = pos.x + 'px';
+        cursor.style.top = pos.y + 'px';
       }
     };
 
@@ -338,73 +387,14 @@ useEffect(() => {
       canvas.removeEventListener('touchmove', onMove);
       canvas.removeEventListener('touchend', onUp);
     };
-  }, [loading]);
+  }, []);
 
   return (
     <div className="archive-canvas-wrapper">
-      {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
-
+      <div className="archive-loading-screen">LOADING ARCHIVE...</div>
       <canvas ref={canvasRef} />
-
-      <GradualBlur
-        target="parent"
-        position="top"
-        height="8.4rem"
-        strength={2}
-        divCount={5}
-        curve="bezier"
-        exponential
-        opacity={1}
-      />
-
-      {activeItem && (
-        <div className={`archive-overlay ${panelVisible ? 'visible' : ''} ${isMobile ? 'mobile' : ''}`}>
-          <div className={`archive-expanded-media ${panelVisible ? 'visible' : ''}`}>
-            {activeItem.video ? (
-              <video
-                ref={videoRef}
-                src={activeItem.video}
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="archive-expanded-video"
-              />
-            ) : activeItem.image ? (
-              <img
-                src={activeItem.image}
-                alt={activeItem.name}
-                className="archive-expanded-image"
-              />
-            ) : null}
-          </div>
-
-          <div className={`archive-context-panel ${panelVisible ? 'visible' : ''}`}>
-            <div className="archive-context-inner">
-              <p className="archive-context-category">ARCHIVE</p>
-              <h2 className="archive-context-title">{activeItem.name}</h2>
-              {activeItem.creator && (
-                <p className="archive-context-creator">{activeItem.creator}</p>
-              )}
-              {activeItem.description && (
-                <p className="archive-context-description">{activeItem.description}</p>
-              )}
-              <button
-                className="archive-context-close"
-                onClick={closeItem}
-              >
-                CLOSE
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div
-        className="archive-cursor"
-        style={{ left: cursorPos.x, top: cursorPos.y }}
-      >
-        <div className="archive-cursor-label">{cursorLabel}</div>
+      <div className="archive-cursor">
+        <div className="archive-cursor-label">DRAG OR CLICK</div>
       </div>
     </div>
   );

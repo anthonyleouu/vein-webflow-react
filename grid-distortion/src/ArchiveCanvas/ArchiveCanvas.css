@@ -15,7 +15,19 @@
   height: 100%;
 }
 
-/* Cursor */
+.archive-loading-screen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  z-index: 10;
+}
+
 .archive-cursor {
   position: fixed;
   top: 0;
@@ -23,7 +35,6 @@
   pointer-events: none;
   z-index: 9999;
   transform: translate(-50%, -50%);
-  transition: opacity 0.3s ease;
 }
 
 .archive-cursor-label {
@@ -38,34 +49,25 @@
   text-transform: uppercase;
 }
 
-.archive-loading {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #fff;
-  font-family: 'Arial', sans-serif;
-  font-size: 11px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
-
-/* Overlay */
-.archive-overlay {
+/* ── Overlay — appended to body directly ── */
+#archive-detail-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 99999;
   display: flex;
   align-items: center;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
-.archive-overlay.visible {
+#archive-detail-overlay.visible {
+  opacity: 1;
   pointer-events: all;
 }
 
-/* Expanded media — left side */
-.archive-expanded-media {
+/* Media — left */
+#archive-detail-media {
   width: 52%;
   height: 100%;
   display: flex;
@@ -78,21 +80,21 @@
               opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.archive-expanded-media.visible {
+#archive-detail-media.visible {
   transform: translateX(0);
   opacity: 1;
 }
 
-.archive-expanded-image,
-.archive-expanded-video {
+.archive-detail-image,
+.archive-detail-video {
   width: 100%;
   height: 85vh;
   object-fit: cover;
   display: block;
 }
 
-/* Context panel — right side */
-.archive-context-panel {
+/* Panel — right */
+#archive-detail-panel {
   width: 48%;
   height: 100%;
   background: #fff;
@@ -103,16 +105,16 @@
   overflow-y: auto;
 }
 
-.archive-context-panel.visible {
+#archive-detail-panel.visible {
   transform: translateX(0);
 }
 
-.archive-context-inner {
+#archive-detail-inner {
   padding: 4rem;
   width: 100%;
 }
 
-.archive-context-category {
+#archive-detail-category {
   font-family: 'Arial', sans-serif;
   font-size: 10px;
   font-weight: 700;
@@ -122,7 +124,7 @@
   text-transform: uppercase;
 }
 
-.archive-context-title {
+#archive-detail-title {
   font-family: 'Arial', sans-serif;
   font-size: clamp(2rem, 4vw, 3.5rem);
   font-weight: 700;
@@ -133,7 +135,7 @@
   letter-spacing: -0.02em;
 }
 
-.archive-context-creator {
+#archive-detail-creator {
   font-family: 'Arial', sans-serif;
   font-size: 13px;
   color: #666;
@@ -142,7 +144,7 @@
   text-transform: uppercase;
 }
 
-.archive-context-description {
+#archive-detail-description {
   font-family: 'Arial', sans-serif;
   font-size: 15px;
   color: #333;
@@ -150,7 +152,7 @@
   margin: 0 0 3rem 0;
 }
 
-.archive-context-close {
+#archive-detail-close {
   background: #000;
   color: #fff;
   border: none;
@@ -164,45 +166,45 @@
   transition: background 0.2s ease;
 }
 
-.archive-context-close:hover {
+#archive-detail-close:hover {
   background: #333;
 }
 
 /* Mobile */
 @media (max-width: 1023px) {
-  .archive-overlay.mobile {
+  #archive-detail-overlay.mobile {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .archive-expanded-media {
+  #archive-detail-media {
     width: 100%;
     height: 45vh;
     padding: 1.5rem;
     transform: translateY(-40px);
   }
 
-  .archive-expanded-media.visible {
+  #archive-detail-media.visible {
     transform: translateY(0);
   }
 
-  .archive-expanded-image,
-  .archive-expanded-video {
+  .archive-detail-image,
+  .archive-detail-video {
     height: 100%;
   }
 
-  .archive-context-panel {
+  #archive-detail-panel {
     width: 100%;
     height: 55vh;
     transform: translateY(100%);
     overflow-y: auto;
   }
 
-  .archive-context-panel.visible {
+  #archive-detail-panel.visible {
     transform: translateY(0);
   }
 
-  .archive-context-inner {
+  #archive-detail-inner {
     padding: 2rem;
   }
 }
