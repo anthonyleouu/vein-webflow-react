@@ -118,23 +118,24 @@ export default function ArchiveCanvas() {
       offCtx.drawImage(img, sx, sy, sw, sh);
 
       // Draw warped strips
-      const strips = 12;
-      const stripW = dw / strips;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(dx, dy, dw, dh);
-      ctx.clip();
+      const strips = 40;
+const stripW = dw / strips;
+ctx.save();
+ctx.beginPath();
+ctx.rect(dx, dy, dw, dh);
+ctx.clip();
 
-      for (let i = 0; i < strips; i++) {
-        const sx2 = i * stripW;
-        const waveY = Math.sin((i / strips) * Math.PI * 2 + s.time * 2) * warpAmount * dh * 0.04;
-        ctx.drawImage(
-          offscreen,
-          sx2, 0, stripW, dh,
-          dx + sx2, dy + waveY, stripW, dh
-        );
-      }
-      ctx.restore();
+for (let i = 0; i < strips; i++) {
+  const sx2 = i * stripW;
+  const waveY = Math.sin((i / strips) * Math.PI * 4 + s.time * 2) * warpAmount * dh * 0.03;
+  // Draw slightly wider than strip to cover seams
+  ctx.drawImage(
+    offscreen,
+    sx2, 0, stripW, dh,
+    dx + sx2, dy + waveY, stripW + 1, dh
+  );
+}
+ctx.restore();
     };
 
     const drawFrame = () => {
