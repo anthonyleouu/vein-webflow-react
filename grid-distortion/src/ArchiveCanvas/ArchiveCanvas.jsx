@@ -89,12 +89,22 @@ export default function ArchiveCanvas() {
   useEffect(() => {
   const handler = (e) => {
     const item = e.detail;
-    setActiveItem(item);
-    setTimeout(() => setPanelVisible(true), 50);
+    console.log('Handler received:', item.name);
+    setActiveItem(prev => {
+      console.log('setActiveItem called, prev:', prev);
+      return item;
+    });
   };
   window.addEventListener('archive:open', handler);
   return () => window.removeEventListener('archive:open', handler);
-}, [setActiveItem, setPanelVisible]);
+}, []);
+
+useEffect(() => {
+  if (activeItem) {
+    console.log('activeItem changed to:', activeItem.name);
+    setTimeout(() => setPanelVisible(true), 50);
+  }
+}, [activeItem]);
 
   useEffect(() => {
     if (loading) return;
