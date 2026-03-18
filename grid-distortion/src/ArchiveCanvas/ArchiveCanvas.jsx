@@ -1,27 +1,60 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  Renderer, Camera, Transform, Program, Mesh, Plane, Texture
+} from 'ogl';
 import './ArchiveCanvas.css';
 
 const GAP = 10;
-const BLOCK_WIDTH = Math.round(window.innerWidth * 0.3);
-const BLOCK_HEIGHT = Math.round(window.innerHeight * 0.7);
-
-const CELL_W = BLOCK_WIDTH + GAP;
-const CELL_H = BLOCK_HEIGHT + GAP;
-
-// Masonry offsets — each column is shifted vertically by a different amount
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 
+const vertexShader = `
+  precision highp float;
+  attribute vec3 position;
+  attribute vec2 uv;
+  uniform mat4 modelViewMatrix;
+  uniform mat4 projectionMatrix;
+  uniform float uTime;
+  uniform float uSpeed;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    vec3 p = position;
+    p.z = (sin(p.x * 4.0 + uTime) * 1.5 + cos(p.y * 2.0 + uTime) * 1.5) * uSpeed * 0.5;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
+const fragmentShader = `
+  precision highp float;
+  uniform sampler2D tMap;
+  uniform vec2 uImageSizes;
+  uniform vec2 uPlaneSizes;
+  varying vec2 vUv;
+  void main() {
+    vec2 ratio = vec2(
+      min((uPlaneSizes.x / uPlaneSizes.y) / (uImageSizes.x / uImageSizes.y), 1.0),
+      min((uPlaneSizes.y / uPlaneSizes.x) / (uImageSizes.y / uImageSizes.x), 1.0)
+    );
+    vec2 uv = vec2(
+      vUv.x * ratio.x + (1.0 - ratio.x) * 0.5,
+      vUv.y * ratio.y + (1.0 - ratio.y) * 0.5
+    );
+    gl_FragColor = texture2D(tMap, uv);
+  }
+`;
+
 export default function ArchiveCanvas() {
-  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   const stateRef = useRef({
     x: 0, y: 0,
     vx: 0, vy: 0,
     dragging: false,
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
-    animId: null,
+    dragStartX: 0, dragStartY: 0,
+    speed: 0,
+    targetSpeed: 0,
     items: [],
-    images: {},
     hoveredSlug: null,
   });
   const [cursorLabel, setCursorLabel] = useState('DRAG OR CLICK');
@@ -35,19 +68,6 @@ export default function ArchiveCanvas() {
         const data = await res.json();
         const items = data.items || [];
         stateRef.current.items = items;
-
-        const imageMap = {};
-        await Promise.all(
-          items.map(item => new Promise(resolve => {
-            if (!item.image) return resolve();
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => { imageMap[item.id] = img; resolve(); };
-            img.onerror = () => resolve();
-            img.src = item.image;
-          }))
-        );
-        stateRef.current.images = imageMap;
         setLoading(false);
       } catch (err) {
         console.error('Failed to fetch archive:', err);
@@ -59,45 +79,235 @@ export default function ArchiveCanvas() {
 
   useEffect(() => {
     if (loading) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const container = containerRef.current;
+    if (!container) return;
     const s = stateRef.current;
+    const items = s.items;
+    if (!items.length) return;
 
-    let blockW = Math.round(window.innerWidth * 0.3);
-    let blockH = Math.round(window.innerHeight * 0.7);
-    let cellW = blockW + GAP;
-    let cellH = blockH + GAP;
+    // --- OGL Setup ---
+    const renderer = new Renderer({
+      alpha: true,
+      antialias: true,
+      dpr: Math.min(window.devicePixelRatio || 1, 2)
+    });
+    const gl = renderer.gl;
+    gl.clearColor(0, 0, 0, 1);
+    container.appendChild(gl.canvas);
+    gl.canvas.style.position = 'absolute';
+    gl.canvas.style.top = '0';
+    gl.canvas.style.left = '0';
 
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      blockW = Math.round(window.innerWidth * 0.3);
-      blockH = Math.round(window.innerHeight * 0.7);
-      cellW = blockW + GAP;
-      cellH = blockH + GAP;
+    const camera = new Camera(gl);
+    camera.fov = 45;
+    camera.position.z = 20;
+
+    const scene = new Transform();
+
+    const geometry = new Plane(gl, {
+      heightSegments: 20,
+      widthSegments: 40
+    });
+
+    let W = container.clientWidth;
+    let H = container.clientHeight;
+
+    const getViewport = () => {
+      const fov = (camera.fov * Math.PI) / 180;
+      const height = 2 * Math.tan(fov / 2) * camera.position.z;
+      const width = height * (W / H);
+      return { width, height };
     };
-    resize();
-    window.addEventListener('resize', resize);
 
-    const getItem = (col, row) => {
-      const items = s.items;
-      if (!items.length) return null;
-      // Different item per row AND col for variety
-      const index = (((col * 3 + row * 7) % items.length) + items.length) % items.length;
-      return items[index];
+    renderer.setSize(W, H);
+    camera.perspective({ aspect: W / H });
+    let viewport = getViewport();
+
+    // Block size in viewport units
+    const getBlockSize = () => {
+      const bw = (W * 0.3 / W) * viewport.width;
+      const bh = (H * 0.7 / H) * viewport.height;
+      return { bw, bh };
     };
 
-    const getMasonryOffset = (col) => {
-      const absCol = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
-      return MASONRY_OFFSETS[absCol] * cellH;
+    // Create a mesh for each item
+    const meshes = [];
+
+    items.forEach((item, i) => {
+      const texture = new Texture(gl, { generateMipmaps: false });
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = item.image;
+      img.onload = () => {
+        texture.image = img;
+        const mesh = meshes.find(m => m.userData.id === item.id);
+        if (mesh) {
+          mesh.program.uniforms.uImageSizes.value = [img.naturalWidth, img.naturalHeight];
+        }
+      };
+
+      const program = new Program(gl, {
+        vertex: vertexShader,
+        fragment: fragmentShader,
+        uniforms: {
+          tMap: { value: texture },
+          uImageSizes: { value: [1, 1] },
+          uPlaneSizes: { value: [1, 1] },
+          uTime: { value: Math.random() * 100 },
+          uSpeed: { value: 0 },
+        },
+        transparent: false,
+        depthTest: false,
+        depthWrite: false,
+      });
+
+      const mesh = new Mesh(gl, { geometry, program });
+      mesh.userData = { id: item.id, slug: item.slug, name: item.name, index: i };
+      mesh.setParent(scene);
+      meshes.push(mesh);
+    });
+
+    // Position meshes based on canvas offset
+    const updateMeshPositions = () => {
+      const { bw, bh } = getBlockSize();
+      const gapVW = (GAP / W) * viewport.width;
+      const gapVH = (GAP / H) * viewport.height;
+      const cellW = bw + gapVW;
+      const cellH = bh + gapVH;
+      const totalItems = items.length;
+
+      // We render a grid of cols x rows around the camera
+      const cols = Math.ceil(viewport.width / cellW) + 6;
+      const rows = Math.ceil(viewport.height / cellH) + 6;
+
+      const offsetX = (s.x / W) * viewport.width;
+      const offsetY = (s.y / H) * viewport.height;
+
+      const startCol = Math.floor(-offsetX / cellW) - 2;
+      const startRow = Math.floor(offsetY / cellH) - 2;
+
+      let meshIndex = 0;
+      const needed = cols * rows;
+
+      // Expand meshes pool if needed
+      while (meshes.length < needed) {
+        const i = meshes.length % totalItems;
+        const item = items[i];
+        const texture = new Texture(gl, { generateMipmaps: false });
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = item.image;
+        img.onload = () => { texture.image = img; };
+
+        const program = new Program(gl, {
+          vertex: vertexShader,
+          fragment: fragmentShader,
+          uniforms: {
+            tMap: { value: texture },
+            uImageSizes: { value: [800, 600] },
+            uPlaneSizes: { value: [bw, bh] },
+            uTime: { value: Math.random() * 100 },
+            uSpeed: { value: 0 },
+          },
+          transparent: false,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const mesh = new Mesh(gl, { geometry, program });
+        mesh.userData = { id: item.id, slug: item.slug, name: item.name, index: meshes.length };
+        mesh.setParent(scene);
+        meshes.push(mesh);
+      }
+
+      for (let col = startCol; col < startCol + cols; col++) {
+        const masonryOffsetFraction = MASONRY_OFFSETS[((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length];
+        const masonryOffsetVH = masonryOffsetFraction * cellH;
+
+        for (let row = startRow; row < startRow + rows; row++) {
+          if (meshIndex >= meshes.length) break;
+          const mesh = meshes[meshIndex];
+          const itemIndex = (((col * 3 + row * 7) % totalItems) + totalItems) % totalItems;
+          const item = items[itemIndex];
+
+          // Update texture if item changed
+          if (mesh.userData.id !== item.id) {
+            mesh.userData = { ...mesh.userData, id: item.id, slug: item.slug, name: item.name };
+            const texture = new Texture(gl, { generateMipmaps: false });
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = item.image;
+            img.onload = () => { texture.image = img; };
+            mesh.program.uniforms.tMap.value = texture;
+          }
+
+          const posX = col * cellW + offsetX + bw / 2 - viewport.width / 2;
+          const posY = -(row * cellH) + offsetY - bh / 2 + viewport.height / 2 - masonryOffsetVH;
+
+          mesh.position.x = posX;
+          mesh.position.y = posY;
+          mesh.scale.x = bw;
+          mesh.scale.y = bh;
+          mesh.program.uniforms.uPlaneSizes.value = [bw, bh];
+          mesh.program.uniforms.uTime.value += 0.04;
+          mesh.program.uniforms.uSpeed.value = s.speed;
+
+          meshIndex++;
+        }
+      }
+
+      // Hide unused meshes
+      for (let i = meshIndex; i < meshes.length; i++) {
+        meshes[i].position.x = 99999;
+      }
     };
 
-    const drawFrame = () => {
-      const W = canvas.width;
-      const H = canvas.height;
+    // Hit testing — convert screen coords to grid item
+    const getItemAtScreenPos = (px, py) => {
+      const { bw, bh } = getBlockSize();
+      const gapVW = (GAP / W) * viewport.width;
+      const gapVH = (GAP / H) * viewport.height;
+      const cellW = bw + gapVW;
+      const cellH = bh + gapVH;
+      const totalItems = items.length;
 
-      // Inertia — 0.96 instead of 0.92 = 40% more travel
+      const offsetX = (s.x / W) * viewport.width;
+      const offsetY = (s.y / H) * viewport.height;
+
+      const startCol = Math.floor(-offsetX / cellW) - 2;
+      const startRow = Math.floor(offsetY / cellH) - 2;
+      const cols = Math.ceil(viewport.width / cellW) + 6;
+      const rows = Math.ceil(viewport.height / cellH) + 6;
+
+      // Convert screen px to viewport coords
+      const vpx = ((px / W) - 0.5) * viewport.width;
+      const vpy = (0.5 - (py / H)) * viewport.height;
+
+      for (let col = startCol; col < startCol + cols; col++) {
+        const masonryOffsetFraction = MASONRY_OFFSETS[((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length];
+        const masonryOffsetVH = masonryOffsetFraction * cellH;
+
+        for (let row = startRow; row < startRow + rows; row++) {
+          const posX = col * cellW + offsetX - viewport.width / 2;
+          const posY = -(row * cellH) + offsetY + viewport.height / 2 - masonryOffsetVH;
+
+          if (
+            vpx >= posX && vpx <= posX + bw &&
+            vpy >= posY - bh && vpy <= posY
+          ) {
+            const itemIndex = (((col * 3 + row * 7) % totalItems) + totalItems) % totalItems;
+            return items[itemIndex];
+          }
+        }
+      }
+      return null;
+    };
+
+    // Animation loop
+    let animId;
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+
       if (!s.dragging) {
         s.vx *= 0.96;
         s.vy *= 0.96;
@@ -105,53 +315,28 @@ export default function ArchiveCanvas() {
         s.y += s.vy;
       }
 
-      ctx.clearRect(0, 0, W, H);
+      // Speed for shader — ease to 0 when not dragging
+      s.targetSpeed = s.dragging
+        ? Math.min(Math.sqrt(s.vx * s.vx + s.vy * s.vy) * 0.08, 1.0)
+        : 0;
+      s.speed += (s.targetSpeed - s.speed) * 0.06;
 
-      const startCol = Math.floor(-s.x / cellW) - 1;
-      const startRow = Math.floor(-s.y / cellH) - 2;
-      const endCol = startCol + Math.ceil(W / cellW) + 3;
-      const endRow = startRow + Math.ceil(H / cellH) + 4;
-
-      for (let col = startCol; col < endCol; col++) {
-        const masonryOffset = getMasonryOffset(col);
-
-        for (let row = startRow; row < endRow; row++) {
-          const item = getItem(col, row);
-          const img = item ? s.images[item.id] : null;
-
-          const screenX = col * cellW + s.x;
-          const screenY = row * cellH + s.y + masonryOffset;
-
-          ctx.save();
-
-          if (img) {
-            const scale = Math.max(
-              blockW / img.naturalWidth,
-              blockH / img.naturalHeight
-            );
-            const dw = img.naturalWidth * scale;
-            const dh = img.naturalHeight * scale;
-            const dx = screenX - (dw - blockW) / 2;
-            const dy = screenY - (dh - blockH) / 2;
-
-            ctx.beginPath();
-            ctx.rect(screenX, screenY, blockW, blockH);
-            ctx.clip();
-            ctx.drawImage(img, dx, dy, dw, dh);
-          } else {
-            ctx.fillStyle = '#111';
-            ctx.fillRect(screenX, screenY, blockW, blockH);
-          }
-
-          ctx.restore();
-        }
-      }
-
-      s.animId = requestAnimationFrame(drawFrame);
+      updateMeshPositions();
+      renderer.render({ scene, camera });
     };
+    animate();
 
-    drawFrame();
+    // Resize
+    const onResize = () => {
+      W = container.clientWidth;
+      H = container.clientHeight;
+      renderer.setSize(W, H);
+      camera.perspective({ aspect: W / H });
+      viewport = getViewport();
+    };
+    window.addEventListener('resize', onResize);
 
+    // Input
     const getPos = e => e.touches
       ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
       : { x: e.clientX, y: e.clientY };
@@ -163,10 +348,10 @@ export default function ArchiveCanvas() {
       s.startY = pos.y - s.y;
       s.lastX = pos.x;
       s.lastY = pos.y;
-      s.vx = 0;
-      s.vy = 0;
       s.dragStartX = pos.x;
       s.dragStartY = pos.y;
+      s.vx = 0;
+      s.vy = 0;
     };
 
     const onMove = e => {
@@ -181,27 +366,7 @@ export default function ArchiveCanvas() {
         s.lastX = pos.x;
         s.lastY = pos.y;
       } else {
-        const startCol = Math.floor(-s.x / cellW) - 1;
-        const startRow = Math.floor(-s.y / cellH) - 2;
-        const endCol = startCol + Math.ceil(canvas.width / cellW) + 3;
-        const endRow = startRow + Math.ceil(canvas.height / cellH) + 4;
-
-        let found = null;
-        outer: for (let col = startCol; col < endCol; col++) {
-          const masonryOffset = getMasonryOffset(col);
-          for (let row = startRow; row < endRow; row++) {
-            const screenX = col * cellW + s.x;
-            const screenY = row * cellH + s.y + masonryOffset;
-            if (
-              pos.x >= screenX && pos.x <= screenX + blockW &&
-              pos.y >= screenY && pos.y <= screenY + blockH
-            ) {
-              found = getItem(col, row);
-              break outer;
-            }
-          }
-        }
-
+        const found = getItemAtScreenPos(pos.x, pos.y);
         if (found) {
           setCursorLabel(found.name.toUpperCase());
           s.hoveredSlug = found.slug;
@@ -222,29 +387,30 @@ export default function ArchiveCanvas() {
       }
     };
 
-    canvas.addEventListener('mousedown', onDown);
-    canvas.addEventListener('mousemove', onMove);
-    canvas.addEventListener('mouseup', onUp);
-    canvas.addEventListener('touchstart', onDown, { passive: true });
-    canvas.addEventListener('touchmove', onMove, { passive: true });
-    canvas.addEventListener('touchend', onUp);
+    const el = gl.canvas;
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    el.addEventListener('touchstart', onDown, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onUp);
 
     return () => {
-      cancelAnimationFrame(s.animId);
-      window.removeEventListener('resize', resize);
-      canvas.removeEventListener('mousedown', onDown);
-      canvas.removeEventListener('mousemove', onMove);
-      canvas.removeEventListener('mouseup', onUp);
-      canvas.removeEventListener('touchstart', onDown);
-      canvas.removeEventListener('touchmove', onMove);
-      canvas.removeEventListener('touchend', onUp);
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', onResize);
+      el.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      el.removeEventListener('touchstart', onDown);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+      if (gl.canvas.parentNode) gl.canvas.parentNode.removeChild(gl.canvas);
     };
   }, [loading]);
 
   return (
-    <div className="archive-canvas-wrapper">
+    <div ref={containerRef} className="archive-canvas-wrapper">
       {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
-      <canvas ref={canvasRef} />
       <div
         className="archive-cursor"
         style={{ left: cursorPos.x, top: cursorPos.y }}
