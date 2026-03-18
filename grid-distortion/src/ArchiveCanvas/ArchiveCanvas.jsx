@@ -4,8 +4,6 @@ import './ArchiveCanvas.css';
 const BLOCK_WIDTH = 400;
 const BLOCK_HEIGHT = 280;
 const GAP = 24;
-const COLS = 4;
-const ROWS = 4;
 
 const CELL_W = BLOCK_WIDTH + GAP;
 const CELL_H = BLOCK_HEIGHT + GAP;
@@ -44,6 +42,8 @@ export default function ArchiveCanvas() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const colData = await colRes.json();
+        console.log('Collections:', colData);
+
         const archiveCol = colData.collections.find(
           c => c.displayName.toLowerCase() === 'archive'
         );
@@ -59,6 +59,8 @@ export default function ArchiveCanvas() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const itemData = await itemRes.json();
+        console.log('Raw items:', JSON.stringify(itemData, null, 2));
+
         const items = itemData.items.map(item => ({
           id: item.id,
           name: item.fieldData.name,
@@ -66,6 +68,7 @@ export default function ArchiveCanvas() {
           image: item.fieldData['cover-image']?.url || null,
         }));
 
+        console.log('Mapped items:', items);
         stateRef.current.items = items;
 
         // Preload images
@@ -106,7 +109,6 @@ export default function ArchiveCanvas() {
     resize();
     window.addEventListener('resize', resize);
 
-    // Get block for a given grid tile
     const getItem = (col, row) => {
       const items = s.items;
       if (!items.length) return null;
@@ -134,10 +136,6 @@ export default function ArchiveCanvas() {
 
       ctx.clearRect(0, 0, W, H);
 
-      // Infinite tiling — figure out which tiles are visible
-      const offsetX = ((s.x % CELL_W) - CELL_W) % CELL_W;
-      const offsetY = ((s.y % CELL_H) - CELL_H) % CELL_H;
-
       const startCol = Math.floor(-s.x / CELL_W) - 1;
       const startRow = Math.floor(-s.y / CELL_H) - 1;
       const endCol = startCol + Math.ceil(W / CELL_W) + 3;
@@ -151,18 +149,14 @@ export default function ArchiveCanvas() {
           const screenX = col * CELL_W + s.x;
           const screenY = row * CELL_H + s.y;
 
-          // Distortion: skew blocks while dragging
           const distX = s.distortion * s.vx * 0.3;
           const distY = s.distortion * s.vy * 0.3;
 
           ctx.save();
           ctx.translate(screenX + BLOCK_WIDTH / 2, screenY + BLOCK_HEIGHT / 2);
-
-          // Apply subtle skew distortion
           ctx.transform(1, distY * 0.01, distX * 0.01, 1, 0, 0);
 
           if (img) {
-            // Draw image with cover fit
             const scale = Math.max(
               BLOCK_WIDTH / img.naturalWidth,
               BLOCK_HEIGHT / img.naturalHeight
@@ -177,7 +171,6 @@ export default function ArchiveCanvas() {
             ctx.clip();
             ctx.drawImage(img, dx, dy, dw, dh);
           } else {
-            // Placeholder
             ctx.fillStyle = '#111';
             ctx.fillRect(-BLOCK_WIDTH / 2, -BLOCK_HEIGHT / 2, BLOCK_WIDTH, BLOCK_HEIGHT);
           }
@@ -191,7 +184,6 @@ export default function ArchiveCanvas() {
 
     drawFrame();
 
-    // Mouse / touch events
     const getPos = e => e.touches
       ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
       : { x: e.clientX, y: e.clientY };
@@ -219,7 +211,6 @@ export default function ArchiveCanvas() {
         s.lastX = pos.x;
         s.lastY = pos.y;
       } else {
-        // Check hover
         const startCol = Math.floor(-s.x / CELL_W) - 1;
         const startRow = Math.floor(-s.y / CELL_H) - 1;
         const endCol = startCol + Math.ceil(canvas.width / CELL_W) + 3;
@@ -256,7 +247,6 @@ export default function ArchiveCanvas() {
       const moved = Math.abs(pos.x - s.lastX) + Math.abs(pos.y - s.lastY);
       s.dragging = false;
 
-      // Only navigate if it was a click, not a drag
       if (moved < 5 && s.hoveredSlug) {
         window.location.href = `/archive/${s.hoveredSlug}`;
       }
