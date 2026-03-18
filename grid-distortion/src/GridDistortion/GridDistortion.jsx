@@ -41,6 +41,9 @@ const GridDistortion = ({
 
     const container = containerRef.current;
 
+    // Disable everything on tablet/mobile
+    const isTouchDevice = window.innerWidth < 1024;
+
     const scene = new THREE.Scene();
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -116,8 +119,21 @@ const GridDistortion = ({
       if (width === 0 || height === 0) return;
 
       const containerAspect = width / height;
+      const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
+
       renderer.setSize(width, height);
-      plane.scale.set(containerAspect, 1, 1);
+
+      // Cover behaviour — like CSS background-size: cover
+      let scaleX, scaleY;
+      if (containerAspect > videoAspect) {
+        scaleX = containerAspect;
+        scaleY = containerAspect / videoAspect;
+      } else {
+        scaleX = videoAspect;
+        scaleY = 1;
+      }
+
+      plane.scale.set(scaleX, scaleY, 1);
 
       const frustumHeight = 1;
       const frustumWidth = frustumHeight * containerAspect;
@@ -137,7 +153,9 @@ const GridDistortion = ({
       x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0
     };
 
+    // Only add mouse listeners on desktop
     const handleMouseMove = e => {
+      if (isTouchDevice) return;
       const rect = container.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
       const y = 1 - (e.clientY - rect.top) / rect.height;
@@ -147,6 +165,7 @@ const GridDistortion = ({
     };
 
     const handleMouseLeave = () => {
+      if (isTouchDevice) return;
       Object.assign(mouseState, {
         x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0
       });
@@ -168,19 +187,22 @@ const GridDistortion = ({
         d[i * 4 + 1] *= relaxation;
       }
 
-      const gridMouseX = size * mouseState.x;
-      const gridMouseY = size * mouseState.y;
-      const maxDist = size * mouse;
+      // Only calculate distortion on desktop
+      if (!isTouchDevice) {
+        const gridMouseX = size * mouseState.x;
+        const gridMouseY = size * mouseState.y;
+        const maxDist = size * mouse;
 
-      for (let i = 0; i < size; i++) {
-        for (let j = 0; j < size; j++) {
-          const distSq =
-            Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
-          if (distSq < maxDist * maxDist) {
-            const index = 4 * (i + size * j);
-            const power = Math.min(maxDist / Math.sqrt(distSq), 10);
-            d[index] += strength * 100 * mouseState.vX * power;
-            d[index + 1] -= strength * 100 * mouseState.vY * power;
+        for (let i = 0; i < size; i++) {
+          for (let j = 0; j < size; j++) {
+            const distSq =
+              Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
+            if (distSq < maxDist * maxDist) {
+              const index = 4 * (i + size * j);
+              const power = Math.min(maxDist / Math.sqrt(distSq), 10);
+              d[index] += strength * 100 * mouseState.vX * power;
+              d[index + 1] -= strength * 100 * mouseState.vY * power;
+            }
           }
         }
       }
