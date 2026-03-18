@@ -77,12 +77,20 @@ export default function ArchiveCanvas() {
     setPanelVisible(false);
     setTimeout(() => {
       setActiveItem(null);
+      stateRef.current._locked = false;
       if (videoRef.current) {
         videoRef.current.pause();
         videoRef.current.src = '';
       }
     }, 600);
   };
+
+  // Bridge between canvas and React state
+  useEffect(() => {
+    const handler = (e) => openItem(e.detail);
+    window.addEventListener('archive:open', handler);
+    return () => window.removeEventListener('archive:open', handler);
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -216,23 +224,29 @@ export default function ArchiveCanvas() {
 
     drawFrame();
 
-    const getPos = e => e.touches
-      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-      : { x: e.clientX, y: e.clientY };
+    const getPos = e => {
+      if (e.touches && e.touches.length > 0) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+      if (e.changedTouches && e.changedTouches.length > 0) {
+        return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+      }
+      return { x: e.clientX, y: e.clientY };
+    };
 
     const onDown = e => {
-  console.log('onDown fired');
-  const pos = getPos(e);
-  s.dragging = true;
-  s.startX = pos.x - s.x;
-  s.startY = pos.y - s.y;
-  s.lastX = pos.x;
-  s.lastY = pos.y;
-  s.dragStartX = pos.x;
-  s.dragStartY = pos.y;
-  s.vx = 0;
-  s.vy = 0;
-};
+      if (s._locked) return;
+      const pos = getPos(e);
+      s.dragging = true;
+      s.startX = pos.x - s.x;
+      s.startY = pos.y - s.y;
+      s.lastX = pos.x;
+      s.lastY = pos.y;
+      s.dragStartX = pos.x;
+      s.dragStartY = pos.y;
+      s.vx = 0;
+      s.vy = 0;
+    };
 
     const onMove = e => {
       if (s._locked) return;
@@ -279,15 +293,19 @@ export default function ArchiveCanvas() {
     };
 
     const onUp = e => {
-  const pos = getPos(e);
-  const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
-  console.log('onUp fired — moved:', moved, 'hoveredSlug:', s.hoveredSlug);
-  s.dragging = false;
+      if (s._locked) return;
+      const pos = getPos(e);
+      const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
+      s.dragging = false;
 
-  if (moved < 8) {
-    console.log('Was a click — hoveredSlug:', s.hoveredSlug);
-  }
-};
+      if (moved < 8 && s.hoveredSlug) {
+        const item = s.items.find(i => i.slug === s.hoveredSlug);
+        if (item) {
+          s._locked = true;
+          window.dispatchEvent(new CustomEvent('archive:open', { detail: item }));
+        }
+      }
+    };
 
     canvas.addEventListener('mousedown', onDown);
     canvas.addEventListener('mousemove', onMove);
@@ -327,7 +345,6 @@ export default function ArchiveCanvas() {
 
       {activeItem && (
         <div className={`archive-overlay ${panelVisible ? 'visible' : ''} ${isMobile ? 'mobile' : ''}`}>
-
           <div className={`archive-expanded-media ${panelVisible ? 'visible' : ''}`}>
             {activeItem.video ? (
               <video
@@ -360,16 +377,12 @@ export default function ArchiveCanvas() {
               )}
               <button
                 className="archive-context-close"
-                onClick={() => {
-                  closeItem();
-                  setTimeout(() => { stateRef.current._locked = false; }, 600);
-                }}
+                onClick={closeItem}
               >
                 CLOSE
               </button>
             </div>
           </div>
-
         </div>
       )}
 
