@@ -81,9 +81,16 @@ export default function ArchiveCanvas() {
     };
 
     const getMasonryOffset = (col) => {
-      const i = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
-      return MASONRY_OFFSETS[i] * cellH;
-    };
+  const i = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
+  return MASONRY_OFFSETS[i] * cellH;
+};
+
+// Parallax multiplier per column — alternating fast/slow/lead/lag
+const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
+const getParallaxOffset = (col) => {
+  const i = ((col % PARALLAX.length) + PARALLAX.length) % PARALLAX.length;
+  return PARALLAX[i];
+};
 
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
@@ -159,8 +166,9 @@ export default function ArchiveCanvas() {
           const item = getItem(col, row);
           const img = item ? s.images[item.id] : null;
 
+          const parallax = getParallaxOffset(col);
           const screenX = col * cellW + s.x;
-          const screenY = row * cellH + s.y + masonryOffset;
+          const screenY = row * cellH + s.y + masonryOffset + s.vy * parallax * 8;
 
           if (img) {
             drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed);
