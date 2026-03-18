@@ -273,6 +273,9 @@ export default function ArchiveCanvas() {
           const opacity = s._locked && !isActive ? s.globalOpacity : 1;
           const scale = isActive ? s.activeScale : 1;
 
+          // Draw active block last so it sits on top
+          if (isActive) continue;
+
           if (img) {
             drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity, scale);
           } else {
@@ -285,7 +288,30 @@ export default function ArchiveCanvas() {
         }
       }
 
-      s.animId = requestAnimationFrame(drawFrame);
+      // Draw active block on top of everything
+    if (s.activeCol !== null && s.activeRow !== null) {
+      const col = s.activeCol;
+      const row = s.activeRow;
+      const item = getItem(col, row);
+      const img = item ? s.images[item.id] : null;
+      const masonryOffset = getMasonryOffset(col);
+      const screenX = col * cellW + s.x;
+      const screenY = row * cellH + s.y + masonryOffset;
+
+      if (img) {
+        drawWarpedImage(img, screenX, screenY, blockW, blockH, 0, 1, s.activeScale);
+      } else {
+        ctx.save();
+        ctx.translate(screenX + blockW / 2, screenY + blockH / 2);
+        ctx.scale(s.activeScale, s.activeScale);
+        ctx.translate(-(screenX + blockW / 2), -(screenY + blockH / 2));
+        ctx.fillStyle = '#111';
+        ctx.fillRect(screenX, screenY, blockW, blockH);
+        ctx.restore();
+      }
+    }
+
+    s.animId = requestAnimationFrame(drawFrame);
     };
 
     drawFrame();
@@ -403,7 +429,7 @@ export default function ArchiveCanvas() {
         s.targetY = s.y + (targetBlockCenterY - currentBlockCenterY);
         s.animating = true;
         s.targetScale = 1.2;
-        s.targetOpacity = 0.8;
+        s.targetOpacity = 0.6;
 
         // Populate panel
         const title = document.getElementById('archive-panel-title');
