@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grid Distortion Test</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #000;
+      }
+      #grid-distortion-root {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="grid-distortion-root"
+      data-video-src="https://videos.pexels.com/video-files/3571264/3571264-uhd_2560_1440_30fps.mp4"
+      data-grid="15"
+      data-mouse="0.1"
+      data-strength="0.15"
+      data-relaxation="0.9"
+    ></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
