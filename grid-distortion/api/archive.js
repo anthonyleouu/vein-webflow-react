@@ -2,22 +2,30 @@ export default async function handler(req, res) {
   const token = process.env.VITE_WEBFLOW_API_TOKEN;
   const siteId = process.env.VITE_WEBFLOW_SITE_ID;
 
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   try {
-    // Get collections
     const colRes = await fetch(
       `https://api.webflow.com/v2/sites/${siteId}/collections`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     const colData = await colRes.json();
+
+    // Log all collection names so we can see exactly what Webflow returns
+    const names = colData.collections.map(c => c.displayName);
+    console.log('Collection names:', names);
+
     const archiveCol = colData.collections.find(
-      c => c.displayName.toLowerCase() === 'archive'
+      c => c.displayName.toLowerCase().includes('archive')
     );
 
     if (!archiveCol) {
-      return res.status(404).json({ error: 'Archive collection not found' });
+      return res.status(404).json({ 
+        error: 'Archive collection not found',
+        availableCollections: names
+      });
     }
 
-    // Get items
     const itemRes = await fetch(
       `https://api.webflow.com/v2/collections/${archiveCol.id}/items`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -31,7 +39,6 @@ export default async function handler(req, res) {
       image: item.fieldData['cover-image']?.url || null,
     }));
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).json({ items });
   } catch (err) {
     return res.status(500).json({ error: err.message });
