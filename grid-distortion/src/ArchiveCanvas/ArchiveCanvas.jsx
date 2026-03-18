@@ -268,7 +268,7 @@ export default function ArchiveCanvas() {
         // Fade to black then navigate
         const fade = document.createElement('div');
         fade.style.cssText = `
-          position: fixed; inset: 0; background: #000;
+          position: fixed; inset: 0; background: #f5f5f5;
           opacity: 0; z-index: 99999;
           transition: opacity 0.5s ease;
           pointer-events: none;
