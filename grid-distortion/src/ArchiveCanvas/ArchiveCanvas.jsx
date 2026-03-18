@@ -24,100 +24,6 @@ export default function ArchiveCanvas() {
     _locked: false,
   });
 
-  // Inject overlay HTML directly into DOM — bypasses React state entirely
-  useEffect(() => {
-    const overlay = document.createElement('div');
-    overlay.id = 'archive-detail-overlay';
-    overlay.innerHTML = `
-      <div id="archive-detail-media"></div>
-      <div id="archive-detail-panel">
-        <div id="archive-detail-inner">
-          <p id="archive-detail-category">ARCHIVE</p>
-          <h2 id="archive-detail-title"></h2>
-          <p id="archive-detail-creator"></p>
-          <p id="archive-detail-description"></p>
-          <button id="archive-detail-close">CLOSE</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const closeBtn = document.getElementById('archive-detail-close');
-    closeBtn.addEventListener('click', () => {
-      overlay.classList.remove('visible');
-      const panel = document.getElementById('archive-detail-panel');
-      const media = document.getElementById('archive-detail-media');
-      panel.classList.remove('visible');
-      media.classList.remove('visible');
-      setTimeout(() => {
-        stateRef.current._locked = false;
-        // Clear video if any
-        const video = media.querySelector('video');
-        if (video) { video.pause(); video.src = ''; }
-        media.innerHTML = '';
-      }, 700);
-    });
-
-    return () => {
-      if (document.body.contains(overlay)) {
-        document.body.removeChild(overlay);
-      }
-    };
-  }, []);
-
-  const openItem = (item) => {
-    const overlay = document.getElementById('archive-detail-overlay');
-    const media = document.getElementById('archive-detail-media');
-    const panel = document.getElementById('archive-detail-panel');
-    const title = document.getElementById('archive-detail-title');
-    const creator = document.getElementById('archive-detail-creator');
-    const description = document.getElementById('archive-detail-description');
-    if (!overlay) return;
-
-    // Populate content
-    title.textContent = item.name || '';
-    creator.textContent = item.creator || '';
-    description.textContent = item.description || '';
-    creator.style.display = item.creator ? 'block' : 'none';
-    description.style.display = item.description ? 'block' : 'none';
-
-    // Set media
-    media.innerHTML = '';
-    if (item.video) {
-      const video = document.createElement('video');
-      video.src = item.video;
-      video.autoplay = true;
-      video.muted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.className = 'archive-detail-video';
-      media.appendChild(video);
-    } else if (item.image) {
-      const img = document.createElement('img');
-      img.src = item.image;
-      img.alt = item.name;
-      img.className = 'archive-detail-image';
-      media.appendChild(img);
-    }
-
-    // Check mobile
-    const isMobile = window.innerWidth < 1024;
-    overlay.className = isMobile ? 'mobile' : '';
-
-    // Trigger animation
-    overlay.classList.add('visible');
-    setTimeout(() => {
-      media.classList.add('visible');
-      panel.classList.add('visible');
-    }, 50);
-  };
-
-  useEffect(() => {
-    const handler = (e) => openItem(e.detail);
-    window.addEventListener('archive:open', handler);
-    return () => window.removeEventListener('archive:open', handler);
-  }, []);
-
   useEffect(() => {
     async function fetchArchive() {
       try {
@@ -138,10 +44,6 @@ export default function ArchiveCanvas() {
           }))
         );
         stateRef.current.images = imageMap;
-
-        // Remove loading state
-        const wrapper = document.querySelector('.archive-canvas-wrapper');
-        if (wrapper) wrapper.classList.remove('is-loading');
       } catch (err) {
         console.error('Failed to fetch archive:', err);
       }
@@ -306,8 +208,12 @@ export default function ArchiveCanvas() {
       if (s._locked) return;
       const pos = getPos(e);
 
-      // Update cursor label via DOM
       const cursorEl = document.querySelector('.archive-cursor-label');
+      const cursor = document.querySelector('.archive-cursor');
+      if (cursor) {
+        cursor.style.left = pos.x + 'px';
+        cursor.style.top = pos.y + 'px';
+      }
 
       if (s.dragging) {
         s.vx = pos.x - s.lastX;
@@ -346,13 +252,6 @@ export default function ArchiveCanvas() {
           s.hoveredSlug = null;
         }
       }
-
-      // Move cursor via DOM
-      const cursor = document.querySelector('.archive-cursor');
-      if (cursor) {
-        cursor.style.left = pos.x + 'px';
-        cursor.style.top = pos.y + 'px';
-      }
     };
 
     const onUp = e => {
@@ -362,11 +261,23 @@ export default function ArchiveCanvas() {
       s.dragging = false;
 
       if (moved < 8 && s.hoveredSlug) {
-        const item = s.items.find(i => i.slug === s.hoveredSlug);
-        if (item) {
-          s._locked = true;
-          window.dispatchEvent(new CustomEvent('archive:open', { detail: item }));
-        }
+        s._locked = true;
+
+        // Fade to black then navigate
+        const fade = document.createElement('div');
+        fade.style.cssText = `
+          position: fixed; inset: 0; background: #000;
+          opacity: 0; z-index: 99999;
+          transition: opacity 0.5s ease;
+          pointer-events: none;
+        `;
+        document.body.appendChild(fade);
+        requestAnimationFrame(() => {
+          fade.style.opacity = '1';
+          setTimeout(() => {
+            window.location.href = `/archive/${s.hoveredSlug}`;
+          }, 500);
+        });
       }
     };
 
@@ -391,7 +302,6 @@ export default function ArchiveCanvas() {
 
   return (
     <div className="archive-canvas-wrapper">
-      <div className="archive-loading-screen">LOADING ARCHIVE...</div>
       <canvas ref={canvasRef} />
       <div className="archive-cursor">
         <div className="archive-cursor-label">DRAG OR CLICK</div>
