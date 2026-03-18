@@ -279,19 +279,18 @@ export default function ArchiveCanvas() {
     };
 
     const onUp = e => {
-      if (s._locked) return;
-      const pos = getPos(e);
-      const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
-      s.dragging = false;
+  if (s._locked) return;
+  const pos = getPos(e);
+  const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
+  s.dragging = false;
 
-      if (moved < 8 && s.hoveredSlug) {
-        const item = s.items.find(i => i.slug === s.hoveredSlug);
-        if (item) {
-          s._locked = true;
-          openItem(item);
-        }
-      }
-    };
+  if (moved < 8 && s.hoveredSlug) {
+    const item = s.items.find(i => i.slug === s.hoveredSlug);
+    if (item) {
+      console.log('Clicked item:', item);
+    }
+  }
+};
 
     canvas.addEventListener('mousedown', onDown);
     canvas.addEventListener('mousemove', onMove);
