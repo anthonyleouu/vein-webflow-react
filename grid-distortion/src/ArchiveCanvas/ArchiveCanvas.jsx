@@ -29,49 +29,15 @@ export default function ArchiveCanvas() {
   const [cursorPos, setCursorPos] = useState({ x: -200, y: -200 });
   const [loading, setLoading] = useState(true);
 
-  // Fetch from Webflow CMS
   useEffect(() => {
-    const token = import.meta.env.VITE_WEBFLOW_API_TOKEN;
-    const siteId = import.meta.env.VITE_WEBFLOW_SITE_ID;
-
     async function fetchArchive() {
       try {
-        // First get collections to find Archive collection ID
-        const colRes = await fetch(
-          `https://api.webflow.com/v2/sites/${siteId}/collections`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const colData = await colRes.json();
-        console.log('Collections:', colData);
-
-        const archiveCol = colData.collections.find(
-          c => c.displayName.toLowerCase() === 'archive'
-        );
-        if (!archiveCol) {
-          console.error('Archive collection not found');
-          setLoading(false);
-          return;
-        }
-
-        // Then get items from that collection
-        const itemRes = await fetch(
-          `https://api.webflow.com/v2/collections/${archiveCol.id}/items`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const itemData = await itemRes.json();
-        console.log('Raw items:', JSON.stringify(itemData, null, 2));
-
-        const items = itemData.items.map(item => ({
-          id: item.id,
-          name: item.fieldData.name,
-          slug: item.fieldData.slug,
-          image: item.fieldData['cover-image']?.url || null,
-        }));
-
-        console.log('Mapped items:', items);
+        const res = await fetch('https://vein-webflow-react.vercel.app/api/archive');
+        const data = await res.json();
+        console.log('Archive data:', data);
+        const items = data.items || [];
         stateRef.current.items = items;
 
-        // Preload images
         const imageMap = {};
         await Promise.all(
           items.map(item => new Promise(resolve => {
@@ -90,11 +56,9 @@ export default function ArchiveCanvas() {
         setLoading(false);
       }
     }
-
     fetchArchive();
   }, []);
 
-  // Canvas render loop
   useEffect(() => {
     if (loading) return;
     const canvas = canvasRef.current;
@@ -120,7 +84,6 @@ export default function ArchiveCanvas() {
       const W = canvas.width;
       const H = canvas.height;
 
-      // Friction / inertia
       if (!s.dragging) {
         s.vx *= 0.92;
         s.vy *= 0.92;
@@ -128,7 +91,6 @@ export default function ArchiveCanvas() {
         s.y += s.vy;
       }
 
-      // Distortion easing
       s.targetDistortion = s.dragging
         ? Math.min(Math.sqrt(s.vx * s.vx + s.vy * s.vy) * 0.5, 1)
         : 0;
