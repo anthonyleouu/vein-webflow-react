@@ -22,13 +22,13 @@ export default function ArchiveCanvas() {
     items: [],
     images: {},
     hoveredSlug: null,
+    hoveredCol: null,
+    hoveredRow: null,
     _locked: false,
-    // Active block tracking
     activeCol: null,
     activeRow: null,
     originX: 0,
     originY: 0,
-    // Animation
     animating: false,
     targetX: 0,
     targetY: 0,
@@ -38,9 +38,7 @@ export default function ArchiveCanvas() {
     targetOpacity: 1,
   });
 
-  // Setup panel and overlay in DOM
   useEffect(() => {
-    // Overlay — closes panel when clicked outside
     const overlay = document.createElement('div');
     overlay.id = 'archive-canvas-overlay';
     overlay.style.cssText = `
@@ -55,17 +53,18 @@ export default function ArchiveCanvas() {
       const s = stateRef.current;
       if (!s._locked) return;
 
-      // Hide panel
       const panel = document.getElementById('archive-panel');
       if (panel) {
         panel.style.transform = 'translateX(100%)';
         panel.style.opacity = '0';
       }
 
-      // Hide overlay
+      // Remove active block DOM overlay
+      const activeImg = document.getElementById('archive-active-block');
+      if (activeImg) activeImg.remove();
+
       overlay.style.display = 'none';
 
-      // Animate canvas back to origin
       s.animating = true;
       s.targetX = s.originX;
       s.targetY = s.originY;
@@ -82,7 +81,6 @@ export default function ArchiveCanvas() {
 
     overlay.addEventListener('click', closePanel);
 
-    // Wire up close button
     const wireClose = () => {
       const closeBtn = document.getElementById('archive-panel-close');
       if (closeBtn) {
@@ -93,11 +91,9 @@ export default function ArchiveCanvas() {
       }
     };
 
-    // Try immediately and after short delay for Webflow
     wireClose();
     setTimeout(wireClose, 1000);
 
-    // Store closePanel on window for access from canvas
     window._archiveClosePanel = closePanel;
 
     return () => {
@@ -184,7 +180,6 @@ export default function ArchiveCanvas() {
       ctx.save();
       ctx.globalAlpha = opacity;
 
-      // Apply scale from center of block
       if (scale !== 1) {
         ctx.translate(dx + dw / 2, dy + dh / 2);
         ctx.scale(scale, scale);
@@ -228,7 +223,6 @@ export default function ArchiveCanvas() {
       const W = canvas.width;
       const H = canvas.height;
 
-      // Smooth animate canvas position to target
       if (s.animating) {
         s.x += (s.targetX - s.x) * 0.08;
         s.y += (s.targetY - s.y) * 0.08;
@@ -239,10 +233,8 @@ export default function ArchiveCanvas() {
         s.y += s.vy;
       }
 
-      // Smooth scale and opacity
       s.activeScale += (s.targetScale - s.activeScale) * 0.08;
       s.globalOpacity += (s.targetOpacity - s.globalOpacity) * 0.08;
-
       s.smoothVy += (s.vy - s.smoothVy) * 0.15;
 
       const rawSpeed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
@@ -268,16 +260,13 @@ export default function ArchiveCanvas() {
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
-          // Determine if this is the active block
           const isActive = s.activeCol === col && s.activeRow === row;
-          const opacity = s._locked && !isActive ? s.globalOpacity : 1;
-          const scale = isActive ? s.activeScale : 1;
-
-          // Draw active block last so it sits on top
           if (isActive) continue;
 
+          const opacity = s._locked ? s.globalOpacity : 1;
+
           if (img) {
-            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity, scale);
+            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity, 1);
           } else {
             ctx.save();
             ctx.globalAlpha = opacity;
@@ -288,30 +277,7 @@ export default function ArchiveCanvas() {
         }
       }
 
-      // Draw active block on top of everything
-    if (s.activeCol !== null && s.activeRow !== null) {
-      const col = s.activeCol;
-      const row = s.activeRow;
-      const item = getItem(col, row);
-      const img = item ? s.images[item.id] : null;
-      const masonryOffset = getMasonryOffset(col);
-      const screenX = col * cellW + s.x;
-      const screenY = row * cellH + s.y + masonryOffset;
-
-      if (img) {
-        drawWarpedImage(img, screenX, screenY, blockW, blockH, 0, 1, s.activeScale);
-      } else {
-        ctx.save();
-        ctx.translate(screenX + blockW / 2, screenY + blockH / 2);
-        ctx.scale(s.activeScale, s.activeScale);
-        ctx.translate(-(screenX + blockW / 2), -(screenY + blockH / 2));
-        ctx.fillStyle = '#111';
-        ctx.fillRect(screenX, screenY, blockW, blockH);
-        ctx.restore();
-      }
-    }
-
-    s.animId = requestAnimationFrame(drawFrame);
+      s.animId = requestAnimationFrame(drawFrame);
     };
 
     drawFrame();
@@ -409,16 +375,13 @@ export default function ArchiveCanvas() {
         s.activeCol = s.hoveredCol;
         s.activeRow = s.hoveredRow;
 
-        // Save origin position
         s.originX = s.x;
         s.originY = s.y;
 
-        // Calculate where the block currently is
         const masonryOffset = getMasonryOffset(s.activeCol);
         const currentBlockScreenX = s.activeCol * cellW + s.x;
         const currentBlockScreenY = s.activeRow * cellH + s.y + masonryOffset;
 
-        // Target: block center lands at 1/3 from left, vertically centered
         const targetBlockCenterX = window.innerWidth * 0.25;
         const targetBlockCenterY = window.innerHeight * 0.5;
 
@@ -430,6 +393,46 @@ export default function ArchiveCanvas() {
         s.animating = true;
         s.targetScale = 1.2;
         s.targetOpacity = 0.6;
+
+        // Create DOM overlay for active block — sits above everything
+        let activeImg = document.getElementById('archive-active-block');
+        if (activeImg) activeImg.remove();
+
+        activeImg = document.createElement('div');
+        activeImg.id = 'archive-active-block';
+        activeImg.style.cssText = `
+          position: fixed;
+          z-index: 1003;
+          pointer-events: none;
+          background-image: url(${item.image});
+          background-size: cover;
+          background-position: center;
+          left: ${currentBlockScreenX}px;
+          top: ${currentBlockScreenY}px;
+          width: ${blockW}px;
+          height: ${blockH}px;
+          transform: scale(1);
+          transform-origin: center;
+          transition: left 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                      top 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                      width 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                      height 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                      transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        `;
+        document.body.appendChild(activeImg);
+
+        // Animate to target position
+        const scaledW = blockW * 1.2;
+        const scaledH = blockH * 1.2;
+        const targetLeft = targetBlockCenterX - scaledW / 2;
+        const targetTop = targetBlockCenterY - scaledH / 2;
+
+        setTimeout(() => {
+          activeImg.style.left = targetLeft + 'px';
+          activeImg.style.top = targetTop + 'px';
+          activeImg.style.width = scaledW + 'px';
+          activeImg.style.height = scaledH + 'px';
+        }, 50);
 
         // Populate panel
         const title = document.getElementById('archive-panel-title');
@@ -443,7 +446,7 @@ export default function ArchiveCanvas() {
         const overlay = document.getElementById('archive-canvas-overlay');
         if (overlay) overlay.style.display = 'block';
 
-        // Slide panel in after canvas starts moving
+        // Slide panel in
         const panel = document.getElementById('archive-panel');
         if (panel) {
           panel.style.transition = 'none';
