@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
+import GradualBlur from '../GradualBlur/GradualBlur';
+
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
@@ -301,11 +303,21 @@ export default function ArchiveCanvas() {
   }, []);
 
   return (
-    <div className="archive-canvas-wrapper">
-      <canvas ref={canvasRef} />
-      <div className="archive-cursor">
-        <div className="archive-cursor-label">DRAG OR CLICK</div>
-      </div>
+  <div className="archive-canvas-wrapper">
+    <canvas ref={canvasRef} />
+    <GradualBlur
+      target="parent"
+      position="top"
+      height="8.4rem"
+      strength={2}
+      divCount={5}
+      curve="bezier"
+      exponential
+      opacity={1}
+    />
+    <div className="archive-cursor">
+      <div className="archive-cursor-label">DRAG OR CLICK</div>
     </div>
-  );
+  </div>
+);
 }
