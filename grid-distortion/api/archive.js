@@ -33,11 +33,14 @@ export default async function handler(req, res) {
     const itemData = await itemRes.json();
 
     const items = itemData.items.map(item => ({
-      id: item.id,
-      name: item.fieldData.name,
-      slug: item.fieldData.slug,
-      image: item.fieldData['cover-image']?.url || null,
-    }));
+  id: item.id,
+  name: item.fieldData.name,
+  slug: item.fieldData.slug,
+  image: item.fieldData['cover-image']?.url || null,
+  video: item.fieldData['cover-video'] || null,
+  creator: item.fieldData['creator'] || null,
+  description: item.fieldData['description'] || null,
+}));
 
     return res.status(200).json({ items });
   } catch (err) {
