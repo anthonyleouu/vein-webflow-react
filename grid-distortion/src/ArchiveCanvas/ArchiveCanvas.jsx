@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
 import GradualBlur from '../GradualBlur/GradualBlur';
 
-
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
@@ -24,7 +23,90 @@ export default function ArchiveCanvas() {
     images: {},
     hoveredSlug: null,
     _locked: false,
+    // Active block tracking
+    activeCol: null,
+    activeRow: null,
+    originX: 0,
+    originY: 0,
+    // Animation
+    animating: false,
+    targetX: 0,
+    targetY: 0,
+    activeScale: 1,
+    targetScale: 1,
+    globalOpacity: 1,
+    targetOpacity: 1,
   });
+
+  // Setup panel and overlay in DOM
+  useEffect(() => {
+    // Overlay — closes panel when clicked outside
+    const overlay = document.createElement('div');
+    overlay.id = 'archive-canvas-overlay';
+    overlay.style.cssText = `
+      position: fixed; inset: 0;
+      z-index: 200;
+      display: none;
+      pointer-events: all;
+    `;
+    document.body.appendChild(overlay);
+
+    const closePanel = () => {
+      const s = stateRef.current;
+      if (!s._locked) return;
+
+      // Hide panel
+      const panel = document.getElementById('archive-panel');
+      if (panel) {
+        panel.style.transform = 'translateX(100%)';
+        panel.style.opacity = '0';
+      }
+
+      // Hide overlay
+      overlay.style.display = 'none';
+
+      // Animate canvas back to origin
+      s.animating = true;
+      s.targetX = s.originX;
+      s.targetY = s.originY;
+      s.targetScale = 1;
+      s.targetOpacity = 1;
+      s.activeCol = null;
+      s.activeRow = null;
+
+      setTimeout(() => {
+        s._locked = false;
+        s.animating = false;
+      }, 700);
+    };
+
+    overlay.addEventListener('click', closePanel);
+
+    // Wire up close button
+    const wireClose = () => {
+      const closeBtn = document.getElementById('archive-panel-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closePanel();
+        });
+      }
+    };
+
+    // Try immediately and after short delay for Webflow
+    wireClose();
+    setTimeout(wireClose, 1000);
+
+    // Store closePanel on window for access from canvas
+    window._archiveClosePanel = closePanel;
+
+    return () => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+      delete window._archiveClosePanel;
+    };
+  }, []);
 
   useEffect(() => {
     async function fetchArchive() {
@@ -92,15 +174,24 @@ export default function ArchiveCanvas() {
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
 
-    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount) => {
-      const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
-      const sw = img.naturalWidth * scale;
-      const sh = img.naturalHeight * scale;
+    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1, scale = 1) => {
+      const scale2 = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+      const sw = img.naturalWidth * scale2;
+      const sh = img.naturalHeight * scale2;
       const sx = -(sw - dw) / 2;
       const sy = -(sh - dh) / 2;
 
+      ctx.save();
+      ctx.globalAlpha = opacity;
+
+      // Apply scale from center of block
+      if (scale !== 1) {
+        ctx.translate(dx + dw / 2, dy + dh / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-(dx + dw / 2), -(dy + dh / 2));
+      }
+
       if (warpAmount < 0.01) {
-        ctx.save();
         ctx.beginPath();
         ctx.rect(dx, dy, dw, dh);
         ctx.clip();
@@ -117,7 +208,6 @@ export default function ArchiveCanvas() {
       const strips = 60;
       const stripH = dh / strips;
 
-      ctx.save();
       ctx.beginPath();
       ctx.rect(dx, dy, dw, dh);
       ctx.clip();
@@ -138,12 +228,20 @@ export default function ArchiveCanvas() {
       const W = canvas.width;
       const H = canvas.height;
 
-      if (!s.dragging) {
+      // Smooth animate canvas position to target
+      if (s.animating) {
+        s.x += (s.targetX - s.x) * 0.08;
+        s.y += (s.targetY - s.y) * 0.08;
+      } else if (!s.dragging) {
         s.vx *= 0.96;
         s.vy *= 0.96;
         s.x += s.vx;
         s.y += s.vy;
       }
+
+      // Smooth scale and opacity
+      s.activeScale += (s.targetScale - s.activeScale) * 0.08;
+      s.globalOpacity += (s.targetOpacity - s.globalOpacity) * 0.08;
 
       s.smoothVy += (s.vy - s.smoothVy) * 0.15;
 
@@ -170,11 +268,19 @@ export default function ArchiveCanvas() {
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
+          // Determine if this is the active block
+          const isActive = s.activeCol === col && s.activeRow === row;
+          const opacity = s._locked && !isActive ? s.globalOpacity : 1;
+          const scale = isActive ? s.activeScale : 1;
+
           if (img) {
-            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed);
+            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity, scale);
           } else {
+            ctx.save();
+            ctx.globalAlpha = opacity;
             ctx.fillStyle = '#111';
             ctx.fillRect(screenX, screenY, blockW, blockH);
+            ctx.restore();
           }
         }
       }
@@ -231,6 +337,7 @@ export default function ArchiveCanvas() {
         const endRow = startRow + Math.ceil(canvas.height / cellH) + 4;
 
         let found = null;
+        let foundCol = null, foundRow = null;
         outer: for (let col = startCol; col < endCol; col++) {
           const masonryOffset = getMasonryOffset(col);
           for (let row = startRow; row < endRow; row++) {
@@ -241,6 +348,8 @@ export default function ArchiveCanvas() {
               pos.y >= screenY && pos.y <= screenY + blockH
             ) {
               found = getItem(col, row);
+              foundCol = col;
+              foundRow = row;
               break outer;
             }
           }
@@ -249,9 +358,13 @@ export default function ArchiveCanvas() {
         if (found) {
           if (cursorEl) cursorEl.textContent = found.name.toUpperCase();
           s.hoveredSlug = found.slug;
+          s.hoveredCol = foundCol;
+          s.hoveredRow = foundRow;
         } else {
           if (cursorEl) cursorEl.textContent = 'DRAG OR CLICK';
           s.hoveredSlug = null;
+          s.hoveredCol = null;
+          s.hoveredRow = null;
         }
       }
     };
@@ -263,23 +376,59 @@ export default function ArchiveCanvas() {
       s.dragging = false;
 
       if (moved < 8 && s.hoveredSlug) {
-        s._locked = true;
+        const item = s.items.find(i => i.slug === s.hoveredSlug);
+        if (!item) return;
 
-        // Fade to black then navigate
-        const fade = document.createElement('div');
-        fade.style.cssText = `
-          position: fixed; inset: 0; background: #f5f5f5;
-          opacity: 0; z-index: 99999;
-          transition: opacity 0.5s ease;
-          pointer-events: none;
-        `;
-        document.body.appendChild(fade);
-        requestAnimationFrame(() => {
-          fade.style.opacity = '1';
+        s._locked = true;
+        s.activeCol = s.hoveredCol;
+        s.activeRow = s.hoveredRow;
+
+        // Save origin position
+        s.originX = s.x;
+        s.originY = s.y;
+
+        // Calculate where the block currently is
+        const masonryOffset = getMasonryOffset(s.activeCol);
+        const currentBlockScreenX = s.activeCol * cellW + s.x;
+        const currentBlockScreenY = s.activeRow * cellH + s.y + masonryOffset;
+
+        // Target: block center lands at 1/3 from left, vertically centered
+        const targetBlockCenterX = window.innerWidth * 0.25;
+        const targetBlockCenterY = window.innerHeight * 0.5;
+
+        const currentBlockCenterX = currentBlockScreenX + blockW / 2;
+        const currentBlockCenterY = currentBlockScreenY + blockH / 2;
+
+        s.targetX = s.x + (targetBlockCenterX - currentBlockCenterX);
+        s.targetY = s.y + (targetBlockCenterY - currentBlockCenterY);
+        s.animating = true;
+        s.targetScale = 1.2;
+        s.targetOpacity = 0.8;
+
+        // Populate panel
+        const title = document.getElementById('archive-panel-title');
+        const creator = document.getElementById('archive-panel-creator');
+        const description = document.getElementById('archive-panel-description');
+        if (title) title.textContent = item.name || '';
+        if (creator) creator.textContent = item.creator || '';
+        if (description) description.textContent = item.description || '';
+
+        // Show overlay
+        const overlay = document.getElementById('archive-canvas-overlay');
+        if (overlay) overlay.style.display = 'block';
+
+        // Slide panel in after canvas starts moving
+        const panel = document.getElementById('archive-panel');
+        if (panel) {
+          panel.style.transition = 'none';
+          panel.style.transform = 'translateX(100%)';
+          panel.style.opacity = '0';
           setTimeout(() => {
-            window.location.href = `/archive/${s.hoveredSlug}`;
-          }, 500);
-        });
+            panel.style.transition = 'transform 0.7s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.7s ease';
+            panel.style.transform = 'translateX(0)';
+            panel.style.opacity = '1';
+          }, 400);
+        }
       }
     };
 
@@ -303,21 +452,21 @@ export default function ArchiveCanvas() {
   }, []);
 
   return (
-  <div className="archive-canvas-wrapper">
-    <canvas ref={canvasRef} />
-    <GradualBlur
-      target="parent"
-      position="top"
-      height="8.4rem"
-      strength={2}
-      divCount={5}
-      curve="bezier"
-      exponential
-      opacity={1}
-    />
-    <div className="archive-cursor">
-      <div className="archive-cursor-label">DRAG OR CLICK</div>
+    <div className="archive-canvas-wrapper">
+      <canvas ref={canvasRef} />
+      <GradualBlur
+        target="parent"
+        position="top"
+        height="8.4rem"
+        strength={2}
+        divCount={5}
+        curve="bezier"
+        exponential
+        opacity={1}
+      />
+      <div className="archive-cursor">
+        <div className="archive-cursor-label">DRAG OR CLICK</div>
+      </div>
     </div>
-  </div>
-);
+  );
 }
