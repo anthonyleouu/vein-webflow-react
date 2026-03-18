@@ -16,6 +16,7 @@ export default function ArchiveCanvas() {
     dragStartX: 0, dragStartY: 0,
     speed: 0,
     time: 0,
+    smoothVy: 0,
     animId: null,
     items: [],
     images: {},
@@ -149,6 +150,7 @@ const getParallaxOffset = (col) => {
         s.y += s.vy;
       }
 
+      s.smoothVy += (s.vy - s.smoothVy) * 0.15;
       const rawSpeed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
       const targetSpeed = s.dragging ? Math.min(rawSpeed * 0.1, 1.0) : 0;
       s.speed += (targetSpeed - s.speed) * 0.06;
@@ -170,7 +172,7 @@ const getParallaxOffset = (col) => {
           const parallax = getParallaxOffset(col);
           const screenX = col * cellW + s.x;
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
-          const screenY = row * cellH + s.y + masonryOffset + s.vy * parallax * 20 * verticalDominance;
+          const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
           if (img) {
             drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed);
@@ -281,7 +283,7 @@ const getParallaxOffset = (col) => {
     <GradualBlur
       target="parent"
       position="top"
-      height="7rem"
+      height="8.5rem"
       strength={2}
       divCount={5}
       curve="bezier"
