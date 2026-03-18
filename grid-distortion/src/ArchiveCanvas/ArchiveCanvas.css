@@ -15,12 +15,13 @@
   height: 100%;
 }
 
+/* Cursor */
 .archive-cursor {
   position: fixed;
   top: 0;
   left: 0;
   pointer-events: none;
-  z-index: 1000;
+  z-index: 9999;
   transform: translate(-50%, -50%);
   transition: opacity 0.3s ease;
 }
@@ -47,4 +48,161 @@
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
+}
+
+/* Overlay */
+.archive-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.archive-overlay.visible {
+  pointer-events: all;
+}
+
+/* Expanded media — left side */
+.archive-expanded-media {
+  width: 52%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  transform: translateX(-60px);
+  opacity: 0;
+  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.archive-expanded-media.visible {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.archive-expanded-image,
+.archive-expanded-video {
+  width: 100%;
+  height: 85vh;
+  object-fit: cover;
+  display: block;
+}
+
+/* Context panel — right side */
+.archive-context-panel {
+  width: 48%;
+  height: 100%;
+  background: #fff;
+  transform: translateX(100%);
+  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  overflow-y: auto;
+}
+
+.archive-context-panel.visible {
+  transform: translateX(0);
+}
+
+.archive-context-inner {
+  padding: 4rem;
+  width: 100%;
+}
+
+.archive-context-category {
+  font-family: 'Arial', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  color: #999;
+  margin: 0 0 1.5rem 0;
+  text-transform: uppercase;
+}
+
+.archive-context-title {
+  font-family: 'Arial', sans-serif;
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-weight: 700;
+  color: #000;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+}
+
+.archive-context-creator {
+  font-family: 'Arial', sans-serif;
+  font-size: 13px;
+  color: #666;
+  margin: 0 0 2rem 0;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.archive-context-description {
+  font-family: 'Arial', sans-serif;
+  font-size: 15px;
+  color: #333;
+  line-height: 1.7;
+  margin: 0 0 3rem 0;
+}
+
+.archive-context-close {
+  background: #000;
+  color: #fff;
+  border: none;
+  padding: 14px 32px;
+  font-family: 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.archive-context-close:hover {
+  background: #333;
+}
+
+/* Mobile */
+@media (max-width: 1023px) {
+  .archive-overlay.mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .archive-expanded-media {
+    width: 100%;
+    height: 45vh;
+    padding: 1.5rem;
+    transform: translateY(-40px);
+  }
+
+  .archive-expanded-media.visible {
+    transform: translateY(0);
+  }
+
+  .archive-expanded-image,
+  .archive-expanded-video {
+    height: 100%;
+  }
+
+  .archive-context-panel {
+    width: 100%;
+    height: 55vh;
+    transform: translateY(100%);
+    overflow-y: auto;
+  }
+
+  .archive-context-panel.visible {
+    transform: translateY(0);
+  }
+
+  .archive-context-inner {
+    padding: 2rem;
+  }
 }
