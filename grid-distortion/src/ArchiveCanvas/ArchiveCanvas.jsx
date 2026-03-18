@@ -87,10 +87,14 @@ export default function ArchiveCanvas() {
 
   // Bridge between canvas and React state
   useEffect(() => {
-    const handler = (e) => openItem(e.detail);
-    window.addEventListener('archive:open', handler);
-    return () => window.removeEventListener('archive:open', handler);
-  }, []);
+  const handler = (e) => {
+    const item = e.detail;
+    setActiveItem(item);
+    setTimeout(() => setPanelVisible(true), 50);
+  };
+  window.addEventListener('archive:open', handler);
+  return () => window.removeEventListener('archive:open', handler);
+}, [setActiveItem, setPanelVisible]);
 
   useEffect(() => {
     if (loading) return;
