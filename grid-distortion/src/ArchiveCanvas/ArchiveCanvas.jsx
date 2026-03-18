@@ -168,7 +168,7 @@ const getParallaxOffset = (col) => {
 
           const parallax = getParallaxOffset(col);
           const screenX = col * cellW + s.x;
-          const screenY = row * cellH + s.y + masonryOffset + s.vy * parallax * 8;
+          const screenY = row * cellH + s.y + masonryOffset + s.vy * parallax * 16;
 
           if (img) {
             drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed);
