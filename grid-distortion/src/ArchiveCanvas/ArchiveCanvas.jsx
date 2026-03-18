@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import './ArchiveCanvas.css';
 
-const BLOCK_WIDTH = 400;
-const BLOCK_HEIGHT = 280;
-const GAP = 24;
+const GAP = 6;
+const BLOCK_WIDTH = Math.round(window.innerWidth * 0.3);
+const BLOCK_HEIGHT = Math.round(window.innerHeight * 0.7);
 
 const CELL_W = BLOCK_WIDTH + GAP;
 const CELL_H = BLOCK_HEIGHT + GAP;
+
+// Masonry offsets — each column is shifted vertically by a different amount
+const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 
 export default function ArchiveCanvas() {
   const canvasRef = useRef(null);
@@ -16,14 +19,10 @@ export default function ArchiveCanvas() {
     dragging: false,
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
-    distortion: 0,
-    targetDistortion: 0,
     animId: null,
     items: [],
     images: {},
     hoveredSlug: null,
-    cursorX: 0,
-    cursorY: 0,
   });
   const [cursorLabel, setCursorLabel] = useState('DRAG OR CLICK');
   const [cursorPos, setCursorPos] = useState({ x: -200, y: -200 });
@@ -34,7 +33,6 @@ export default function ArchiveCanvas() {
       try {
         const res = await fetch('https://vein-webflow-react.vercel.app/api/archive');
         const data = await res.json();
-        console.log('Archive data:', data);
         const items = data.items || [];
         stateRef.current.items = items;
 
@@ -66,9 +64,18 @@ export default function ArchiveCanvas() {
     const ctx = canvas.getContext('2d');
     const s = stateRef.current;
 
+    let blockW = Math.round(window.innerWidth * 0.3);
+    let blockH = Math.round(window.innerHeight * 0.7);
+    let cellW = blockW + GAP;
+    let cellH = blockH + GAP;
+
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      blockW = Math.round(window.innerWidth * 0.3);
+      blockH = Math.round(window.innerHeight * 0.7);
+      cellW = blockW + GAP;
+      cellH = blockH + GAP;
     };
     resize();
     window.addEventListener('resize', resize);
@@ -76,65 +83,64 @@ export default function ArchiveCanvas() {
     const getItem = (col, row) => {
       const items = s.items;
       if (!items.length) return null;
-      const index = ((col % items.length) + items.length) % items.length;
+      // Different item per row AND col for variety
+      const index = (((col * 3 + row * 7) % items.length) + items.length) % items.length;
       return items[index];
+    };
+
+    const getMasonryOffset = (col) => {
+      const absCol = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
+      return MASONRY_OFFSETS[absCol] * cellH;
     };
 
     const drawFrame = () => {
       const W = canvas.width;
       const H = canvas.height;
 
+      // Inertia — 0.96 instead of 0.92 = 40% more travel
       if (!s.dragging) {
-        s.vx *= 0.92;
-        s.vy *= 0.92;
+        s.vx *= 0.96;
+        s.vy *= 0.96;
         s.x += s.vx;
         s.y += s.vy;
       }
 
-      s.targetDistortion = s.dragging
-        ? Math.min(Math.sqrt(s.vx * s.vx + s.vy * s.vy) * 0.5, 1)
-        : 0;
-      s.distortion += (s.targetDistortion - s.distortion) * 0.08;
-
       ctx.clearRect(0, 0, W, H);
 
-      const startCol = Math.floor(-s.x / CELL_W) - 1;
-      const startRow = Math.floor(-s.y / CELL_H) - 1;
-      const endCol = startCol + Math.ceil(W / CELL_W) + 3;
-      const endRow = startRow + Math.ceil(H / CELL_H) + 3;
+      const startCol = Math.floor(-s.x / cellW) - 1;
+      const startRow = Math.floor(-s.y / cellH) - 2;
+      const endCol = startCol + Math.ceil(W / cellW) + 3;
+      const endRow = startRow + Math.ceil(H / cellH) + 4;
 
       for (let col = startCol; col < endCol; col++) {
+        const masonryOffset = getMasonryOffset(col);
+
         for (let row = startRow; row < endRow; row++) {
           const item = getItem(col, row);
           const img = item ? s.images[item.id] : null;
 
-          const screenX = col * CELL_W + s.x;
-          const screenY = row * CELL_H + s.y;
-
-          const distX = s.distortion * s.vx * 0.3;
-          const distY = s.distortion * s.vy * 0.3;
+          const screenX = col * cellW + s.x;
+          const screenY = row * cellH + s.y + masonryOffset;
 
           ctx.save();
-          ctx.translate(screenX + BLOCK_WIDTH / 2, screenY + BLOCK_HEIGHT / 2);
-          ctx.transform(1, distY * 0.01, distX * 0.01, 1, 0, 0);
 
           if (img) {
             const scale = Math.max(
-              BLOCK_WIDTH / img.naturalWidth,
-              BLOCK_HEIGHT / img.naturalHeight
+              blockW / img.naturalWidth,
+              blockH / img.naturalHeight
             );
             const dw = img.naturalWidth * scale;
             const dh = img.naturalHeight * scale;
-            const dx = -dw / 2;
-            const dy = -dh / 2;
+            const dx = screenX - (dw - blockW) / 2;
+            const dy = screenY - (dh - blockH) / 2;
 
             ctx.beginPath();
-            ctx.rect(-BLOCK_WIDTH / 2, -BLOCK_HEIGHT / 2, BLOCK_WIDTH, BLOCK_HEIGHT);
+            ctx.rect(screenX, screenY, blockW, blockH);
             ctx.clip();
             ctx.drawImage(img, dx, dy, dw, dh);
           } else {
             ctx.fillStyle = '#111';
-            ctx.fillRect(-BLOCK_WIDTH / 2, -BLOCK_HEIGHT / 2, BLOCK_WIDTH, BLOCK_HEIGHT);
+            ctx.fillRect(screenX, screenY, blockW, blockH);
           }
 
           ctx.restore();
@@ -173,25 +179,25 @@ export default function ArchiveCanvas() {
         s.lastX = pos.x;
         s.lastY = pos.y;
       } else {
-        const startCol = Math.floor(-s.x / CELL_W) - 1;
-        const startRow = Math.floor(-s.y / CELL_H) - 1;
-        const endCol = startCol + Math.ceil(canvas.width / CELL_W) + 3;
-        const endRow = startRow + Math.ceil(canvas.height / CELL_H) + 3;
+        const startCol = Math.floor(-s.x / cellW) - 1;
+        const startRow = Math.floor(-s.y / cellH) - 2;
+        const endCol = startCol + Math.ceil(canvas.width / cellW) + 3;
+        const endRow = startRow + Math.ceil(canvas.height / cellH) + 4;
 
         let found = null;
-        for (let col = startCol; col < endCol; col++) {
+        outer: for (let col = startCol; col < endCol; col++) {
+          const masonryOffset = getMasonryOffset(col);
           for (let row = startRow; row < endRow; row++) {
-            const screenX = col * CELL_W + s.x;
-            const screenY = row * CELL_H + s.y;
+            const screenX = col * cellW + s.x;
+            const screenY = row * cellH + s.y + masonryOffset;
             if (
-              pos.x >= screenX && pos.x <= screenX + BLOCK_WIDTH &&
-              pos.y >= screenY && pos.y <= screenY + BLOCK_HEIGHT
+              pos.x >= screenX && pos.x <= screenX + blockW &&
+              pos.y >= screenY && pos.y <= screenY + blockH
             ) {
               found = getItem(col, row);
-              break;
+              break outer;
             }
           }
-          if (found) break;
         }
 
         if (found) {
