@@ -1,5 +1,5 @@
 {
   "buildCommand": "npm install && npm run build",
-  "outputDirectory": "grid-distortion/dist",
+  "outputDirectory": "dist",
   "framework": null
 }
