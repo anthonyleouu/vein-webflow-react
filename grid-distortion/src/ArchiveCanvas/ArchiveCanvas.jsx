@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import './ArchiveCanvas.css';
+import GradualBlur from '../GradualBlur/GradualBlur';
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
@@ -274,15 +275,25 @@ const getParallaxOffset = (col) => {
   }, [loading]);
 
   return (
-    <div className="archive-canvas-wrapper">
-      {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
-      <canvas ref={canvasRef} />
-      <div
-        className="archive-cursor"
-        style={{ left: cursorPos.x, top: cursorPos.y }}
-      >
-        <div className="archive-cursor-label">{cursorLabel}</div>
-      </div>
+  <div className="archive-canvas-wrapper">
+    {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
+    <canvas ref={canvasRef} />
+    <GradualBlur
+      target="parent"
+      position="top"
+      height="7rem"
+      strength={2}
+      divCount={5}
+      curve="bezier"
+      exponential
+      opacity={1}
+    />
+    <div
+      className="archive-cursor"
+      style={{ left: cursorPos.x, top: cursorPos.y }}
+    >
+      <div className="archive-cursor-label">{cursorLabel}</div>
     </div>
-  );
+  </div>
+);
 }
