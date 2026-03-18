@@ -4,27 +4,40 @@ import GradualBlur from '../GradualBlur/GradualBlur';
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
+const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
 
 export default function ArchiveCanvas() {
   const canvasRef = useRef(null);
+  const videoRef = useRef(null);
   const stateRef = useRef({
     x: 0, y: 0,
     vx: 0, vy: 0,
+    smoothVy: 0,
     dragging: false,
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
     dragStartX: 0, dragStartY: 0,
     speed: 0,
     time: 0,
-    smoothVy: 0,
     animId: null,
     items: [],
     images: {},
     hoveredSlug: null,
+    _locked: false,
   });
   const [cursorLabel, setCursorLabel] = useState('DRAG OR CLICK');
   const [cursorPos, setCursorPos] = useState({ x: -200, y: -200 });
   const [loading, setLoading] = useState(true);
+  const [activeItem, setActiveItem] = useState(null);
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     async function fetchArchive() {
@@ -55,6 +68,22 @@ export default function ArchiveCanvas() {
     fetchArchive();
   }, []);
 
+  const openItem = (item) => {
+    setActiveItem(item);
+    setTimeout(() => setPanelVisible(true), 50);
+  };
+
+  const closeItem = () => {
+    setPanelVisible(false);
+    setTimeout(() => {
+      setActiveItem(null);
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.src = '';
+      }
+    }, 600);
+  };
+
   useEffect(() => {
     if (loading) return;
     const canvas = canvasRef.current;
@@ -83,16 +112,14 @@ export default function ArchiveCanvas() {
     };
 
     const getMasonryOffset = (col) => {
-  const i = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
-  return MASONRY_OFFSETS[i] * cellH;
-};
+      const i = ((col % MASONRY_OFFSETS.length) + MASONRY_OFFSETS.length) % MASONRY_OFFSETS.length;
+      return MASONRY_OFFSETS[i] * cellH;
+    };
 
-// Parallax multiplier per column — alternating fast/slow/lead/lag
-const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
-const getParallaxOffset = (col) => {
-  const i = ((col % PARALLAX.length) + PARALLAX.length) % PARALLAX.length;
-  return PARALLAX[i];
-};
+    const getParallaxOffset = (col) => {
+      const i = ((col % PARALLAX.length) + PARALLAX.length) % PARALLAX.length;
+      return PARALLAX[i];
+    };
 
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
@@ -151,6 +178,7 @@ const getParallaxOffset = (col) => {
       }
 
       s.smoothVy += (s.vy - s.smoothVy) * 0.15;
+
       const rawSpeed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
       const targetSpeed = s.dragging ? Math.min(rawSpeed * 0.1, 1.0) : 0;
       s.speed += (targetSpeed - s.speed) * 0.06;
@@ -165,11 +193,11 @@ const getParallaxOffset = (col) => {
 
       for (let col = startCol; col < endCol; col++) {
         const masonryOffset = getMasonryOffset(col);
+        const parallax = getParallaxOffset(col);
         for (let row = startRow; row < endRow; row++) {
           const item = getItem(col, row);
           const img = item ? s.images[item.id] : null;
 
-          const parallax = getParallaxOffset(col);
           const screenX = col * cellW + s.x;
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
@@ -193,6 +221,7 @@ const getParallaxOffset = (col) => {
       : { x: e.clientX, y: e.clientY };
 
     const onDown = e => {
+      if (s._locked) return;
       const pos = getPos(e);
       s.dragging = true;
       s.startX = pos.x - s.x;
@@ -206,6 +235,7 @@ const getParallaxOffset = (col) => {
     };
 
     const onMove = e => {
+      if (s._locked) return;
       const pos = getPos(e);
       setCursorPos({ x: pos.x, y: pos.y });
 
@@ -249,11 +279,17 @@ const getParallaxOffset = (col) => {
     };
 
     const onUp = e => {
+      if (s._locked) return;
       const pos = getPos(e);
       const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
       s.dragging = false;
+
       if (moved < 8 && s.hoveredSlug) {
-        window.location.href = `/archive/${s.hoveredSlug}`;
+        const item = s.items.find(i => i.slug === s.hoveredSlug);
+        if (item) {
+          s._locked = true;
+          openItem(item);
+        }
       }
     };
 
@@ -277,25 +313,76 @@ const getParallaxOffset = (col) => {
   }, [loading]);
 
   return (
-  <div className="archive-canvas-wrapper">
-    {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
-    <canvas ref={canvasRef} />
-    <GradualBlur
-      target="parent"
-      position="top"
-      height="8.5rem"
-      strength={2}
-      divCount={5}
-      curve="bezier"
-      exponential
-      opacity={1}
-    />
-    <div
-      className="archive-cursor"
-      style={{ left: cursorPos.x, top: cursorPos.y }}
-    >
-      <div className="archive-cursor-label">{cursorLabel}</div>
+    <div className="archive-canvas-wrapper">
+      {loading && <div className="archive-loading">LOADING ARCHIVE...</div>}
+
+      <canvas ref={canvasRef} />
+
+      <GradualBlur
+        target="parent"
+        position="top"
+        height="8.4rem"
+        strength={2}
+        divCount={5}
+        curve="bezier"
+        exponential
+        opacity={1}
+      />
+
+      {activeItem && (
+        <div className={`archive-overlay ${panelVisible ? 'visible' : ''} ${isMobile ? 'mobile' : ''}`}>
+
+          <div className={`archive-expanded-media ${panelVisible ? 'visible' : ''}`}>
+            {activeItem.video ? (
+              <video
+                ref={videoRef}
+                src={activeItem.video}
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="archive-expanded-video"
+              />
+            ) : activeItem.image ? (
+              <img
+                src={activeItem.image}
+                alt={activeItem.name}
+                className="archive-expanded-image"
+              />
+            ) : null}
+          </div>
+
+          <div className={`archive-context-panel ${panelVisible ? 'visible' : ''}`}>
+            <div className="archive-context-inner">
+              <p className="archive-context-category">ARCHIVE</p>
+              <h2 className="archive-context-title">{activeItem.name}</h2>
+              {activeItem.creator && (
+                <p className="archive-context-creator">{activeItem.creator}</p>
+              )}
+              {activeItem.description && (
+                <p className="archive-context-description">{activeItem.description}</p>
+              )}
+              <button
+                className="archive-context-close"
+                onClick={() => {
+                  closeItem();
+                  setTimeout(() => { stateRef.current._locked = false; }, 600);
+                }}
+              >
+                CLOSE
+              </button>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      <div
+        className="archive-cursor"
+        style={{ left: cursorPos.x, top: cursorPos.y }}
+      >
+        <div className="archive-cursor-label">{cursorLabel}</div>
+      </div>
     </div>
-  </div>
-);
+  );
 }
