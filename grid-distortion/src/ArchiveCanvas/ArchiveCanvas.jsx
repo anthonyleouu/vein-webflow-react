@@ -221,18 +221,18 @@ export default function ArchiveCanvas() {
       : { x: e.clientX, y: e.clientY };
 
     const onDown = e => {
-      if (s._locked) return;
-      const pos = getPos(e);
-      s.dragging = true;
-      s.startX = pos.x - s.x;
-      s.startY = pos.y - s.y;
-      s.lastX = pos.x;
-      s.lastY = pos.y;
-      s.dragStartX = pos.x;
-      s.dragStartY = pos.y;
-      s.vx = 0;
-      s.vy = 0;
-    };
+  console.log('onDown fired');
+  const pos = getPos(e);
+  s.dragging = true;
+  s.startX = pos.x - s.x;
+  s.startY = pos.y - s.y;
+  s.lastX = pos.x;
+  s.lastY = pos.y;
+  s.dragStartX = pos.x;
+  s.dragStartY = pos.y;
+  s.vx = 0;
+  s.vy = 0;
+};
 
     const onMove = e => {
       if (s._locked) return;
@@ -279,16 +279,13 @@ export default function ArchiveCanvas() {
     };
 
     const onUp = e => {
-  if (s._locked) return;
   const pos = getPos(e);
   const moved = Math.hypot(pos.x - s.dragStartX, pos.y - s.dragStartY);
+  console.log('onUp fired — moved:', moved, 'hoveredSlug:', s.hoveredSlug);
   s.dragging = false;
 
-  if (moved < 8 && s.hoveredSlug) {
-    const item = s.items.find(i => i.slug === s.hoveredSlug);
-    if (item) {
-      console.log('Clicked item:', item);
-    }
+  if (moved < 8) {
+    console.log('Was a click — hoveredSlug:', s.hoveredSlug);
   }
 };
 
