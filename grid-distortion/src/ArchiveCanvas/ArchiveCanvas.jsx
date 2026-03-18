@@ -85,56 +85,50 @@ export default function ArchiveCanvas() {
       return MASONRY_OFFSETS[i] * cellH;
     };
 
-    // Offscreen canvas for wave effect
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
 
     const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount) => {
-      if (warpAmount < 0.01) {
-        // No warp — draw directly
-        const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
-        const sw = img.naturalWidth * scale;
-        const sh = img.naturalHeight * scale;
-        const sx = dx - (sw - dw) / 2;
-        const sy = dy - (sh - dh) / 2;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(dx, dy, dw, dh);
-        ctx.clip();
-        ctx.drawImage(img, sx, sy, sw, sh);
-        ctx.restore();
-        return;
-      }
-
-      // Draw to offscreen first
-      offscreen.width = dw;
-      offscreen.height = dh;
       const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
       const sw = img.naturalWidth * scale;
       const sh = img.naturalHeight * scale;
       const sx = -(sw - dw) / 2;
       const sy = -(sh - dh) / 2;
+
+      if (warpAmount < 0.01) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(dx, dy, dw, dh);
+        ctx.clip();
+        ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
+        ctx.restore();
+        return;
+      }
+
+      offscreen.width = dw;
+      offscreen.height = dh;
       offCtx.clearRect(0, 0, dw, dh);
       offCtx.drawImage(img, sx, sy, sw, sh);
 
-      // Draw warped strips
       const strips = 60;
-const stripH = dh / strips;
-ctx.save();
-ctx.beginPath();
-ctx.rect(dx, dy, dw, dh);
-ctx.clip();
+      const stripH = dh / strips;
 
-for (let i = 0; i < strips; i++) {
-  const sy2 = i * stripH;
-  const waveX = Math.sin((i / strips) * Math.PI * 4 + s.time * 2) * warpAmount * dw * 0.03;
-  ctx.drawImage(
-    offscreen,
-    0, sy2, dw, stripH + 1,
-    dx + waveX, dy + sy2, dw, stripH + 1
-  );
-}
-ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dx, dy, dw, dh);
+      ctx.clip();
+
+      for (let i = 0; i < strips; i++) {
+        const sy2 = i * stripH;
+        const waveX = Math.sin((i / strips) * Math.PI * 4 + s.time * 2) * warpAmount * dw * 0.03;
+        ctx.drawImage(
+          offscreen,
+          0, sy2, dw, stripH + 1,
+          dx + waveX, dy + sy2, dw, stripH + 1
+        );
+      }
+      ctx.restore();
+    };
 
     const drawFrame = () => {
       const W = canvas.width;
@@ -147,7 +141,6 @@ ctx.restore();
         s.y += s.vy;
       }
 
-      // Speed easing
       const rawSpeed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
       const targetSpeed = s.dragging ? Math.min(rawSpeed * 0.1, 1.0) : 0;
       s.speed += (targetSpeed - s.speed) * 0.06;
