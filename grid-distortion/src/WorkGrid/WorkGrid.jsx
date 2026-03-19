@@ -412,36 +412,104 @@ export default function WorkGrid({ onSwitchToList }) {
 
   // Grid/List toggle — no !important, uses className toggle
   useEffect(() => {
-    const btnGrid = document.querySelector('.btn-grid');
-    const btnList = document.querySelector('.btn-list');
-    const gridWrap = document.querySelector('.work-grid-wrap');
-    const listWrap = document.querySelector('.work-list-wrap');
+  const btnGrid = document.querySelector('.btn-grid');
+  const btnList = document.querySelector('.btn-list');
+  const gridWrap = document.querySelector('.work-grid-wrap');
+  const listWrap = document.querySelector('.work-list-wrap');
+  const videoList = document.querySelector('.video-list');
 
-    if (!btnGrid || !btnList) return;
+  if (!btnGrid || !btnList || !listWrap || !videoList) return;
 
-    const showGrid = (e) => {
-      e.stopPropagation();
-      stateRef.current.isListView = false;
-      if (gridWrap) gridWrap.style.setProperty('display', 'block');
-      if (listWrap) listWrap.style.setProperty('display', 'none');
-    };
+  const buildListVideos = () => {
+    // Clear and rebuild list videos
+    videoList.innerHTML = '';
+    itemsRef.current.forEach((item, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'list-video-item';
+      wrapper.style.cssText = `
+        width: 35vw;
+        height: 45vh;
+        flex-shrink: 0;
+        overflow: hidden;
+        position: relative;
+        opacity: 0;
+      `;
 
-    const showList = (e) => {
-      e.stopPropagation();
-      stateRef.current.isListView = true;
-      if (gridWrap) gridWrap.style.setProperty('display', 'none');
-      if (listWrap) listWrap.style.setProperty('display', 'block');
-      onSwitchToList?.();
-    };
+      const video = document.createElement('video');
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.src = item.videoUrl;
+      video.style.cssText = `
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      `;
+      video.load();
+      video.play().catch(() => {});
 
-    btnGrid.addEventListener('click', showGrid);
-    btnList.addEventListener('click', showList);
+      wrapper.appendChild(video);
+      videoList.appendChild(wrapper);
+    });
+  };
 
-    return () => {
-      btnGrid.removeEventListener('click', showGrid);
-      btnList.removeEventListener('click', showList);
-    };
-  }, [onSwitchToList]);
+  const showList = (e) => {
+    e.stopPropagation();
+    if (stateRef.current.isListView) return;
+    stateRef.current.isListView = true;
+
+    buildListVideos();
+
+    // Show list wrap
+    listWrap.classList.add('is-visible');
+
+    // Fade in all list video items with GSAP
+    const listItems = videoList.querySelectorAll('.list-video-item');
+    if (window.gsap) {
+      window.gsap.to(listItems, {
+        opacity: 1,
+        duration: 1.8,
+        stagger: 0.1,
+        ease: 'power2.out',
+      });
+    } else {
+      listItems.forEach(item => { item.style.opacity = 1; });
+    }
+
+    onSwitchToList?.();
+  };
+
+  const showGrid = (e) => {
+    e.stopPropagation();
+    if (!stateRef.current.isListView) return;
+    stateRef.current.isListView = false;
+
+    if (window.gsap) {
+      const listItems = videoList.querySelectorAll('.list-video-item');
+      window.gsap.to(listItems, {
+        opacity: 0,
+        duration: 0.5,
+        ease: 'power2.in',
+        onComplete: () => {
+          listWrap.classList.remove('is-visible');
+          videoList.innerHTML = '';
+        },
+      });
+    } else {
+      listWrap.classList.remove('is-visible');
+      videoList.innerHTML = '';
+    }
+  };
+
+  btnGrid.addEventListener('click', showGrid);
+  btnList.addEventListener('click', showList);
+
+  return () => {
+    btnGrid.removeEventListener('click', showGrid);
+    btnList.removeEventListener('click', showList);
+  };
+}, [onSwitchToList]);
 
   // Click to open
   useEffect(() => {
