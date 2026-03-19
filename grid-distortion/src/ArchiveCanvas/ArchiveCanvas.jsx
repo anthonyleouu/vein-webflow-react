@@ -1,138 +1,10 @@
 import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
 import GradualBlur from '../GradualBlur/GradualBlur';
-import * as THREE from 'three';
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
-
-const startBlockDistortion = (container, imageSrc, width, height) => {
-  const vertexShader = `
-    uniform float time;
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `;
-  const fragmentShader = `
-    uniform sampler2D uDataTexture;
-    uniform sampler2D uTexture;
-    varying vec2 vUv;
-    void main() {
-      vec2 uv = vUv;
-      vec4 offset = texture2D(uDataTexture, vUv);
-      gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
-    }
-  `;
-
-  const scene = new THREE.Scene();
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x000000, 0);
-  renderer.setSize(width, height);
-  renderer.domElement.style.cssText = `
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
-  `;
-  container.style.overflow = 'hidden';
-  container.appendChild(renderer.domElement);
-
-  const aspect = width / height;
-  const camera = new THREE.OrthographicCamera(
-    -aspect / 2, aspect / 2, 0.5, -0.5, -1000, 1000
-  );
-  camera.position.z = 2;
-
-  const grid = 15;
-  const data = new Float32Array(4 * grid * grid);
-  const dataTexture = new THREE.DataTexture(
-    data, grid, grid, THREE.RGBAFormat, THREE.FloatType
-  );
-  dataTexture.needsUpdate = true;
-
-  const uniforms = {
-    uTexture: { value: null },
-    uDataTexture: { value: dataTexture },
-  };
-
-  new THREE.TextureLoader().load(imageSrc, texture => {
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    uniforms.uTexture.value = texture;
-  });
-
-  const material = new THREE.ShaderMaterial({
-    uniforms, vertexShader, fragmentShader,
-    transparent: true, side: THREE.DoubleSide,
-  });
-
-  const geometry = new THREE.PlaneGeometry(aspect, 1, grid - 1, grid - 1);
-  const plane = new THREE.Mesh(geometry, material);
-  scene.add(plane);
-
-  const mouseState = { x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0 };
-
-  const onMouseMove = e => {
-    const rect = container.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = 1 - (e.clientY - rect.top) / rect.height;
-    mouseState.vX = x - mouseState.prevX;
-    mouseState.vY = y - mouseState.prevY;
-    Object.assign(mouseState, { x, y, prevX: x, prevY: y });
-  };
-
-  const onMouseLeave = () => {
-    Object.assign(mouseState, { x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0 });
-  };
-
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseleave', onMouseLeave);
-
-  let animId;
-  const animate = () => {
-    animId = requestAnimationFrame(animate);
-    const d = dataTexture.image.data;
-    const mouse = 0.1, strength = 0.15, relaxation = 0.9;
-
-    for (let i = 0; i < grid * grid; i++) {
-      d[i * 4] *= relaxation;
-      d[i * 4 + 1] *= relaxation;
-    }
-
-    const gridMouseX = grid * mouseState.x;
-    const gridMouseY = grid * mouseState.y;
-    const maxDist = grid * mouse;
-
-    for (let i = 0; i < grid; i++) {
-      for (let j = 0; j < grid; j++) {
-        const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
-        if (distSq < maxDist * maxDist) {
-          const index = 4 * (i + grid * j);
-          const power = Math.min(maxDist / Math.sqrt(distSq), 10);
-          d[index] += strength * 100 * mouseState.vX * power;
-          d[index + 1] -= strength * 100 * mouseState.vY * power;
-        }
-      }
-    }
-
-    dataTexture.needsUpdate = true;
-    renderer.render(scene, camera);
-  };
-  animate();
-
-  container._destroyWebGL = () => {
-    cancelAnimationFrame(animId);
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseleave', onMouseLeave);
-    renderer.dispose();
-    renderer.forceContextLoss();
-    geometry.dispose();
-    material.dispose();
-    dataTexture.dispose();
-  };
-};
 
 export default function ArchiveCanvas() {
   const canvasRef = useRef(null);
@@ -162,7 +34,6 @@ export default function ArchiveCanvas() {
     targetY: 0,
     globalOpacity: 1,
     targetOpacity: 1,
-    // Active block animation state
     activeBlockX: 0,
     activeBlockY: 0,
     activeBlockTargetX: 0,
@@ -173,10 +44,22 @@ export default function ArchiveCanvas() {
     activeBlockTargetH: 0,
     activeBlockImg: null,
     activeBlockAnimating: false,
-    activeBlockDone: false,
+    activeBlockSettled: false,
+    activeBlockDistortion: 0,
+    activeBlockTargetDistortion: 0,
+    mouseVX: 0,
+    mouseVY: 0,
+    lastMouseX: 0,
+    lastMouseY: 0,
+    // Grid distortion data for active block
+    gridData: null,
   });
 
   useEffect(() => {
+    // Init grid distortion data
+    const grid = 15;
+    stateRef.current.gridData = new Float32Array(4 * grid * grid);
+
     const overlay = document.createElement('div');
     overlay.id = 'archive-canvas-overlay';
     overlay.style.cssText = `
@@ -195,13 +78,6 @@ export default function ArchiveCanvas() {
         panel.style.opacity = '0';
       }
 
-      // Clean up WebGL overlay if exists
-      const webglOverlay = document.getElementById('archive-active-block');
-      if (webglOverlay) {
-        if (webglOverlay._destroyWebGL) webglOverlay._destroyWebGL();
-        webglOverlay.remove();
-      }
-
       overlay.style.display = 'none';
 
       s.animating = true;
@@ -211,8 +87,11 @@ export default function ArchiveCanvas() {
       s.activeCol = null;
       s.activeRow = null;
       s.activeBlockAnimating = false;
-      s.activeBlockDone = false;
+      s.activeBlockSettled = false;
       s.activeBlockImg = null;
+      s.activeBlockDistortion = 0;
+      s.activeBlockTargetDistortion = 0;
+      if (s.gridData) s.gridData.fill(0);
 
       setTimeout(() => {
         s._locked = false;
@@ -273,6 +152,8 @@ export default function ArchiveCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const s = stateRef.current;
+    const GRID = 15;
+    const EASE = 0.07;
 
     let blockW, blockH, cellW, cellH;
 
@@ -286,6 +167,15 @@ export default function ArchiveCanvas() {
     };
     resize();
     window.addEventListener('resize', resize);
+
+    // Track mouse for distortion
+    const onMouseMove = e => {
+      s.mouseVX = e.clientX - s.lastMouseX;
+      s.mouseVY = e.clientY - s.lastMouseY;
+      s.lastMouseX = e.clientX;
+      s.lastMouseY = e.clientY;
+    };
+    window.addEventListener('mousemove', onMouseMove);
 
     const getItem = (col, row) => {
       const items = s.items;
@@ -307,27 +197,11 @@ export default function ArchiveCanvas() {
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
 
-    const drawImageCovered = (img, dx, dy, dw, dh, opacity = 1) => {
+    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1) => {
       if (!img) return;
       const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
       const sw = img.naturalWidth * scale;
       const sh = img.naturalHeight * scale;
-      const sx = -(sw - dw) / 2;
-      const sy = -(sh - dh) / 2;
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.beginPath();
-      ctx.rect(dx, dy, dw, dh);
-      ctx.clip();
-      ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
-      ctx.restore();
-    };
-
-    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1) => {
-      if (!img) return;
-      const scale2 = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
-      const sw = img.naturalWidth * scale2;
-      const sh = img.naturalHeight * scale2;
       const sx = -(sw - dw) / 2;
       const sy = -(sh - dh) / 2;
 
@@ -363,7 +237,93 @@ export default function ArchiveCanvas() {
       ctx.restore();
     };
 
-    const EASE = 0.07;
+    // Draw active block with GridDistortion-style effect
+    const drawActiveBlock = (img, dx, dy, dw, dh) => {
+      if (!img) return;
+
+      const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+      const sw = img.naturalWidth * scale;
+      const sh = img.naturalHeight * scale;
+      const sx = -(sw - dw) / 2;
+      const sy = -(sh - dh) / 2;
+
+      if (!s.activeBlockSettled || window.innerWidth < 1024) {
+        // Just draw normally before settled or on mobile
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(dx, dy, dw, dh);
+        ctx.clip();
+        ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
+        ctx.restore();
+        return;
+      }
+
+      // Update grid distortion data
+      const d = s.gridData;
+      const mouse = 0.1;
+      const strength = 0.15;
+      const relaxation = 0.9;
+
+      for (let i = 0; i < GRID * GRID; i++) {
+        d[i * 4] *= relaxation;
+        d[i * 4 + 1] *= relaxation;
+      }
+
+      const mouseXInBlock = s.lastMouseX - dx;
+      const mouseYInBlock = s.lastMouseY - dy;
+      const gridMouseX = GRID * (mouseXInBlock / dw);
+      const gridMouseY = GRID * (1 - mouseYInBlock / dh);
+      const maxDist = GRID * mouse;
+
+      for (let i = 0; i < GRID; i++) {
+        for (let j = 0; j < GRID; j++) {
+          const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
+          if (distSq < maxDist * maxDist) {
+            const index = 4 * (i + GRID * j);
+            const power = Math.min(maxDist / Math.sqrt(distSq), 10);
+            d[index] += strength * 100 * (s.mouseVX * 0.01) * power;
+            d[index + 1] -= strength * 100 * (s.mouseVY * 0.01) * power;
+          }
+        }
+      }
+
+      // Draw with grid distortion using strips
+      offscreen.width = dw;
+      offscreen.height = dh;
+      offCtx.clearRect(0, 0, dw, dh);
+      offCtx.drawImage(img, sx, sy, sw, sh);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dx, dy, dw, dh);
+      ctx.clip();
+
+      const strips = GRID;
+      const stripW = dw / strips;
+
+      for (let i = 0; i < strips; i++) {
+        for (let j = 0; j < strips; j++) {
+          const index = 4 * (i + GRID * j);
+          const offsetX = d[index] * dw * 0.02;
+          const offsetY = d[index + 1] * dh * 0.02;
+          const sx2 = i * stripW;
+          const sy2 = j * (dh / strips);
+          const sw2 = stripW + 1;
+          const sh2 = dh / strips + 1;
+          ctx.drawImage(
+            offscreen,
+            sx2, sy2, sw2, sh2,
+            dx + sx2 - offsetX, dy + sy2 - offsetY, sw2, sh2
+          );
+        }
+      }
+
+      ctx.restore();
+
+      // Decay mouse velocity
+      s.mouseVX *= 0.85;
+      s.mouseVY *= 0.85;
+    };
 
     const drawFrame = () => {
       const W = canvas.width;
@@ -406,8 +366,6 @@ export default function ArchiveCanvas() {
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
           const isActive = s.activeCol === col && s.activeRow === row;
-
-          // Always draw all blocks — active block drawn separately on top
           const opacity = (s._locked && !isActive) ? s.globalOpacity : 1;
 
           if (img) {
@@ -422,36 +380,26 @@ export default function ArchiveCanvas() {
         }
       }
 
-      // Draw active block on top — fully in canvas, no DOM flash possible
-      if (s.activeBlockAnimating && s.activeBlockImg && !s.activeBlockDone) {
+      // Animate and draw active block on top — pure canvas, zero flash
+      if (s.activeBlockAnimating && s.activeBlockImg) {
         s.activeBlockX += (s.activeBlockTargetX - s.activeBlockX) * EASE;
         s.activeBlockY += (s.activeBlockTargetY - s.activeBlockY) * EASE;
         s.activeBlockW += (s.activeBlockTargetW - s.activeBlockW) * EASE;
         s.activeBlockH += (s.activeBlockTargetH - s.activeBlockH) * EASE;
 
-        drawImageCovered(s.activeBlockImg, s.activeBlockX, s.activeBlockY, s.activeBlockW, s.activeBlockH, 1);
-
-        // Check if animation is complete
         const dx = Math.abs(s.activeBlockX - s.activeBlockTargetX);
-const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
-const totalDist = Math.hypot(s.activeBlockTargetX - s.activeBlockX + dx, s.activeBlockTargetY - s.activeBlockY + dy);
-if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
-  s.activeBlockDone = true;
+        const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
+        if (dx < 1 && dy < 1 && !s.activeBlockSettled) {
+          s.activeBlockSettled = true;
+        }
 
-  const webglContainer = document.createElement('div');
-  webglContainer.id = 'archive-active-block';
-  webglContainer.style.cssText = `
-    position: fixed;
-    z-index: 1003;
-    pointer-events: none;
-    left: ${s.activeBlockTargetX}px;
-    top: ${s.activeBlockTargetY}px;
-    width: ${s.activeBlockTargetW}px;
-    height: ${s.activeBlockTargetH}px;
-  `;
-  document.body.appendChild(webglContainer);
-  startBlockDistortion(webglContainer, s.activeBlockImg.src, s.activeBlockTargetW, s.activeBlockTargetH);
-}
+        drawActiveBlock(
+          s.activeBlockImg,
+          s.activeBlockX,
+          s.activeBlockY,
+          s.activeBlockW,
+          s.activeBlockH
+        );
       }
 
       s.animId = requestAnimationFrame(drawFrame);
@@ -560,8 +508,8 @@ if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
 
         const targetBlockCenterX = window.innerWidth * 0.25;
         const targetBlockCenterY = window.innerHeight * 0.5;
-        const scaledW = blockW * 1.2;
-        const scaledH = blockH * 1.2;
+        const scaledW = blockW * 1.1;
+        const scaledH = blockH * 1.1;
         const targetLeft = targetBlockCenterX - scaledW / 2;
         const targetTop = targetBlockCenterY - scaledH / 2;
 
@@ -570,7 +518,6 @@ if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
         s.animating = true;
         s.targetOpacity = 0.6;
 
-        // Start canvas-driven active block animation — zero flash
         s.activeBlockX = currentBlockScreenX;
         s.activeBlockY = currentBlockScreenY;
         s.activeBlockW = blockW;
@@ -581,9 +528,10 @@ if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
         s.activeBlockTargetH = scaledH;
         s.activeBlockImg = s.images[item.id] || null;
         s.activeBlockAnimating = true;
-        s.activeBlockDone = false;
+        s.activeBlockSettled = false;
+        s.activeBlockDistortion = 0;
+        if (s.gridData) s.gridData.fill(0);
 
-        // Populate panel
         const title = document.getElementById('archive-panel-title');
         const creator = document.getElementById('archive-panel-creator');
         const description = document.getElementById('archive-panel-description');
@@ -591,11 +539,9 @@ if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
         if (creator) creator.textContent = item.creator || '';
         if (description) description.textContent = item.description || '';
 
-        // Show overlay
         const overlay = document.getElementById('archive-canvas-overlay');
         if (overlay) overlay.style.display = 'block';
 
-        // Slide panel in
         const panel = document.getElementById('archive-panel');
         if (panel) {
           panel.style.transition = 'none';
@@ -620,6 +566,7 @@ if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
     return () => {
       cancelAnimationFrame(s.animId);
       window.removeEventListener('resize', resize);
+      window.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('mousedown', onDown);
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('mouseup', onUp);
