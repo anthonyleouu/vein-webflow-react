@@ -288,56 +288,38 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [loading, loadVideoTexture]);
 
-  // Scroll handling
   useEffect(() => {
-    if (!items.length) return;
-    const s = stateRef.current;
-    let wheelTimeout = null;
+  if (!items.length) return;
+  const s = stateRef.current;
 
-    const handleWheel = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (s.transitioning) return;
-      const direction = e.deltaY > 0 ? 1 : -1;
-      if (!s.scrollHoldStart) {
-        s.scrollHoldStart = Date.now();
-        s.scrollDirection = direction;
-      }
-      clearTimeout(wheelTimeout);
-      wheelTimeout = setTimeout(() => {
-        s.scrollHoldStart = null;
-        s.scrollDirection = null;
-      }, 150);
-      const held = Date.now() - s.scrollHoldStart;
-      if (held >= SCROLL_DURATION_THRESHOLD) {
-        navigateTo(s.currentIndex + s.scrollDirection);
-        s.scrollHoldStart = null;
-        s.scrollDirection = null;
-        clearTimeout(wheelTimeout);
-      }
-    };
+  const handleWheel = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (s.transitioning) return;
 
-    const handleKeyDown = (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
-    };
+    const delta = Math.abs(e.deltaY);
+    if (delta < 50) return; // ignore tiny accidental scrolls
 
-    const wrapper = document.getElementById('work-grid-root');
-    if (wrapper) {
-      wrapper.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    window.addEventListener('keydown', handleKeyDown);
+    const direction = e.deltaY > 0 ? 1 : -1;
+    navigateTo(s.currentIndex + direction);
+  };
 
-    return () => {
-      if (wrapper) {
-        wrapper.removeEventListener('wheel', handleWheel);
-      }
-      window.removeEventListener('wheel', handleWheel);
-      window.removeEventListener('keydown', handleKeyDown);
-      clearTimeout(wheelTimeout);
-    };
-  }, [items, navigateTo]);
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
+  };
+
+  const wrapper = document.getElementById('work-grid-root');
+  if (wrapper) wrapper.addEventListener('wheel', handleWheel, { passive: false });
+  window.addEventListener('wheel', handleWheel, { passive: false });
+  window.addEventListener('keydown', handleKeyDown);
+
+  return () => {
+    if (wrapper) wrapper.removeEventListener('wheel', handleWheel);
+    window.removeEventListener('wheel', handleWheel);
+    window.removeEventListener('keydown', handleKeyDown);
+  };
+}, [items, navigateTo]);
 
   // Mouse tracking
   useEffect(() => {
