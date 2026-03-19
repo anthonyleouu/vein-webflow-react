@@ -31,7 +31,6 @@ const RELAXATION = 0.92;
 const BLAST_STRENGTH = 60;
 const SCROLL_COOLDOWN = 900;
 
-// Inject a style tag that wins over everything
 function injectStyle(id, css) {
   let el = document.getElementById(id);
   if (!el) {
@@ -45,6 +44,7 @@ function injectStyle(id, css) {
 export default function WorkGrid({ onSwitchToList }) {
   const itemsRef = useRef([]);
   const videoRefs = useRef([]);
+  const wrapperRefs = useRef([]);
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
@@ -69,51 +69,18 @@ export default function WorkGrid({ onSwitchToList }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Inject base styles on mount
   useEffect(() => {
     injectStyle('work-grid-styles', `
-      .work-list-wrap {
-        display: none;
-        position: fixed;
+      .video-stack {
+        position: absolute;
         inset: 0;
-        width: 100vw;
-        height: 100vh;
-        z-index: 50;
-        background: #000;
-      }
-      .work-list-wrap.wg-visible {
-        display: flex !important;
-        align-items: center;
-        justify-content: center;
-      }
-      .work-list-view {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
         width: 100%;
         height: 100%;
       }
-      .video-list {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        height: 45vh;
-      }
-      .list-video-item {
-        width: 35vw;
-        height: 45vh;
-        flex-shrink: 0;
+      .grid-video-item {
+        position: absolute;
         overflow: hidden;
-        position: relative;
-      }
-      .list-video-item video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-      .work-canvas canvas {
-        width: 100% !important;
-        height: 100% !important;
+        will-change: transform, width, height, opacity;
       }
       .grid-video-item video {
         position: absolute;
@@ -121,6 +88,10 @@ export default function WorkGrid({ onSwitchToList }) {
         width: 100%;
         height: 100%;
         object-fit: cover;
+      }
+      .work-canvas canvas {
+        width: 100% !important;
+        height: 100% !important;
       }
     `);
   }, []);
@@ -153,24 +124,26 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build grid video elements
+  // Build video elements — all fullscreen by default
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
     if (!stack) return;
 
     stack.innerHTML = '';
+    wrapperRefs.current = [];
+    videoRefs.current = [];
+
     items.forEach((item, i) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'grid-video-item';
       wrapper.style.cssText = `
-        position: absolute;
-        inset: 0;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
         opacity: ${i === 0 ? 1 : 0};
         z-index: ${i === 0 ? 1 : 0};
-        transition: opacity 0.3s ease;
       `;
 
       const video = document.createElement('video');
@@ -181,6 +154,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
       wrapper.appendChild(video);
       stack.appendChild(wrapper);
+      wrapperRefs.current[i] = wrapper;
       videoRefs.current[i] = video;
     });
 
@@ -267,7 +241,7 @@ export default function WorkGrid({ onSwitchToList }) {
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
-    if (s.transitioning || !allItems.length) return;
+    if (s.transitioning || !allItems.length || s.isListView) return;
     s.transitioning = true;
 
     const total = allItems.length;
@@ -277,16 +251,16 @@ export default function WorkGrid({ onSwitchToList }) {
     blastExit();
 
     setTimeout(() => {
-      if (stack?.children[s.currentIndex]) {
-        stack.children[s.currentIndex].style.opacity = 0;
-        stack.children[s.currentIndex].style.zIndex = 0;
+      if (wrapperRefs.current[s.currentIndex]) {
+        wrapperRefs.current[s.currentIndex].style.opacity = 0;
+        wrapperRefs.current[s.currentIndex].style.zIndex = 0;
       }
       videoRefs.current[s.currentIndex]?.pause();
 
       setTimeout(() => {
-        if (stack?.children[wrapped]) {
-          stack.children[wrapped].style.opacity = 1;
-          stack.children[wrapped].style.zIndex = 1;
+        if (wrapperRefs.current[wrapped]) {
+          wrapperRefs.current[wrapped].style.opacity = 1;
+          wrapperRefs.current[wrapped].style.zIndex = 1;
         }
 
         s.currentIndex = wrapped;
@@ -300,6 +274,94 @@ export default function WorkGrid({ onSwitchToList }) {
       }, 50);
     }, 300);
   }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
+
+  // Switch to LIST — animate videos into horizontal row
+  const switchToList = useCallback(() => {
+    const s = stateRef.current;
+    if (s.isListView || !window.gsap) return;
+    s.isListView = true;
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const itemW = W * 0.35;
+    const itemH = H * 0.45;
+    const total = wrapperRefs.current.length;
+    const activeIdx = s.currentIndex;
+    const centerX = (W - itemW) / 2;
+    const centerY = (H - itemH) / 2;
+
+    // Load all videos for list view
+    itemsRef.current.forEach((item, i) => {
+      const video = videoRefs.current[i];
+      if (video && !video.src) {
+        video.crossOrigin = 'anonymous';
+        video.src = item.videoUrl;
+        video.load();
+        video.play().catch(() => {});
+      } else if (video) {
+        video.play().catch(() => {});
+      }
+    });
+
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
+
+      const offset = i - activeIdx;
+      const targetX = centerX + offset * itemW;
+      const targetY = centerY;
+
+      window.gsap.to(wrapper, {
+        position: 'absolute',
+        left: targetX,
+        top: targetY,
+        width: itemW,
+        height: itemH,
+        opacity: 1,
+        zIndex: i === activeIdx ? 2 : 1,
+        duration: 1.8,
+        ease: 'power3.inOut',
+      });
+    });
+
+    // Hide canvas in list view
+    const canvas = document.querySelector('.work-canvas');
+    if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
+
+  }, []);
+
+  // Switch back to GRID
+  const switchToGrid = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.isListView || !window.gsap) return;
+    s.isListView = false;
+
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
+      const isActive = i === s.currentIndex;
+
+      window.gsap.to(wrapper, {
+        left: 0,
+        top: 0,
+        width: '100%',
+        height: '100%',
+        opacity: isActive ? 1 : 0,
+        zIndex: isActive ? 1 : 0,
+        duration: 1.2,
+        ease: 'power3.inOut',
+        onComplete: () => {
+          if (!isActive) {
+            const video = videoRefs.current[i];
+            if (video) video.pause();
+          }
+        },
+      });
+    });
+
+    // Show canvas again
+    const canvas = document.querySelector('.work-canvas');
+    if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
+
+  }, []);
 
   // Setup Three.js
   useEffect(() => {
@@ -462,89 +524,31 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Grid/List toggle
+  // Toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
-    const listWrap = document.querySelector('.work-list-wrap');
-    const videoList = document.querySelector('.video-list');
+    if (!btnGrid || !btnList) return;
 
-    if (!btnGrid || !btnList || !listWrap || !videoList) return;
-
-    const buildListVideos = () => {
-      videoList.innerHTML = '';
-      itemsRef.current.forEach((item) => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'list-video-item';
-        wrapper.style.opacity = '0';
-
-        const video = document.createElement('video');
-        video.muted = true;
-        video.loop = true;
-        video.playsInline = true;
-        video.crossOrigin = 'anonymous';
-        video.src = item.videoUrl;
-        video.load();
-        video.play().catch(() => {});
-
-        wrapper.appendChild(video);
-        videoList.appendChild(wrapper);
-      });
+    const handleGrid = (e) => {
+      e.stopPropagation();
+      switchToGrid();
     };
 
-    const showList = (e) => {
+    const handleList = (e) => {
       e.stopPropagation();
-      if (stateRef.current.isListView) return;
-      stateRef.current.isListView = true;
-
-      buildListVideos();
-      listWrap.classList.add('wg-visible');
-
-      const listItems = videoList.querySelectorAll('.list-video-item');
-      if (window.gsap) {
-        window.gsap.to(listItems, {
-          opacity: 1,
-          duration: 1.8,
-          stagger: 0.1,
-          ease: 'power2.out',
-        });
-      } else {
-        listItems.forEach(item => { item.style.opacity = '1'; });
-      }
-
+      switchToList();
       onSwitchToList?.();
     };
 
-    const showGrid = (e) => {
-      e.stopPropagation();
-      if (!stateRef.current.isListView) return;
-      stateRef.current.isListView = false;
-
-      const listItems = videoList.querySelectorAll('.list-video-item');
-      if (window.gsap) {
-        window.gsap.to(listItems, {
-          opacity: 0,
-          duration: 0.5,
-          ease: 'power2.in',
-          onComplete: () => {
-            listWrap.classList.remove('wg-visible');
-            videoList.innerHTML = '';
-          },
-        });
-      } else {
-        listWrap.classList.remove('wg-visible');
-        videoList.innerHTML = '';
-      }
-    };
-
-    btnGrid.addEventListener('click', showGrid);
-    btnList.addEventListener('click', showList);
+    btnGrid.addEventListener('click', handleGrid);
+    btnList.addEventListener('click', handleList);
 
     return () => {
-      btnGrid.removeEventListener('click', showGrid);
-      btnList.removeEventListener('click', showList);
+      btnGrid.removeEventListener('click', handleGrid);
+      btnList.removeEventListener('click', handleList);
     };
-  }, [onSwitchToList]);
+  }, [switchToGrid, switchToList, onSwitchToList]);
 
   // Click to open
   useEffect(() => {
