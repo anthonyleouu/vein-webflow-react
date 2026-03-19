@@ -464,18 +464,14 @@ export default function ArchiveCanvas() {
         }
 
         if (found) {
-            if (window._archiveSetCursorText) {
-                 window._archiveSetCursorText(found.name.toUpperCase(), true);
-            }
-            s.hoveredSlug = found.slug;
-            s.hoveredCol = foundCol;
-            s.hoveredRow = foundRow;
-        } else {
-        if (window._archiveResetCursor) window._archiveResetCursor();
-           s.hoveredSlug = null;
-           s.hoveredCol = null;
-           s.hoveredRow = null;
-        }
+  s.hoveredSlug = found.slug;
+  s.hoveredCol = foundCol;
+  s.hoveredRow = foundRow;
+} else {
+  s.hoveredSlug = null;
+  s.hoveredCol = null;
+  s.hoveredRow = null;
+}
       }
     };
 
