@@ -464,15 +464,17 @@ export default function ArchiveCanvas() {
         }
 
         if (found) {
-          if (cursorEl) cursorEl.textContent = found.name.toUpperCase();
-          s.hoveredSlug = found.slug;
-          s.hoveredCol = foundCol;
-          s.hoveredRow = foundRow;
+            if (window._archiveSetCursorText) {
+                 window._archiveSetCursorText(found.name.toUpperCase(), true);
+            }
+            s.hoveredSlug = found.slug;
+            s.hoveredCol = foundCol;
+            s.hoveredRow = foundRow;
         } else {
-          if (cursorEl) cursorEl.textContent = 'DRAG OR CLICK';
-          s.hoveredSlug = null;
-          s.hoveredCol = null;
-          s.hoveredRow = null;
+        if (window._archiveResetCursor) window._archiveResetCursor();
+           s.hoveredSlug = null;
+           s.hoveredCol = null;
+           s.hoveredRow = null;
         }
       }
     };
