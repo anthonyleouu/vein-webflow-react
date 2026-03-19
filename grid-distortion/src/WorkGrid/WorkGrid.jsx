@@ -23,16 +23,15 @@ const fragmentShader = `
 `;
 
 const GRID = 15;
-const MOUSE_STRENGTH = 0.08;
+const MOUSE_STRENGTH = 0.15;
 const MOUSE_RADIUS = 0.1;
 const RELAXATION = 0.9;
-const BLAST_STRENGTH = 200; // tuned down from 500
+const BLAST_STRENGTH = 150;
 const SCROLL_COOLDOWN = 800;
 
 export default function WorkGrid({ onSwitchToList }) {
   const itemsRef = useRef([]);
   const videoRefs = useRef([]);
-  const hlsRefs = useRef([]);
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
@@ -51,14 +50,15 @@ export default function WorkGrid({ onSwitchToList }) {
     animId: null,
     gridData: null,
     lastScrollTime: 0,
+    isListView: false,
   });
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Get GSAP scramble from window (loaded in Webflow)
+  // GSAP scramble using site's existing GSAP
   const scramble = useCallback((element, text) => {
-    if (!element || !window.gsap || !window.ScrambleTextPlugin) return;
+    if (!element || !window.gsap) return;
     window.gsap.to(element, {
       duration: 1.2,
       scrambleText: {
@@ -69,19 +69,16 @@ export default function WorkGrid({ onSwitchToList }) {
     });
   }, []);
 
-  // Update counter and title with scramble
-  const updateUI = useCallback((item, index, total) => {
+  // Update UI text
+  const updateUI = useCallback((item, index) => {
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
-
+    const num = String(index + 1).padStart(2, '0');
     if (titleEl) scramble(titleEl, item.name.toUpperCase());
-    if (counterEl) {
-      const num = String(index + 1).padStart(2, '0');
-      scramble(counterEl, `[PROJECT ${num}]`);
-    }
+    if (counterEl) scramble(counterEl, `[PROJECT ${num}]`);
   }, [scramble]);
 
-  // Fetch work items
+  // Fetch items
   useEffect(() => {
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
@@ -94,14 +91,12 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements inside video-stack
+  // Build video elements
   useEffect(() => {
     if (loading || !items.length) return;
-
     const stack = document.querySelector('.video-stack');
     if (!stack) return;
 
-    // Clear placeholder
     stack.innerHTML = '';
 
     items.forEach((item, i) => {
@@ -114,7 +109,6 @@ export default function WorkGrid({ onSwitchToList }) {
         height: 100%;
         opacity: ${i === 0 ? 1 : 0};
         z-index: ${i === 0 ? 1 : 0};
-        transition: opacity 0.1s;
       `;
 
       const video = document.createElement('video');
@@ -135,16 +129,11 @@ export default function WorkGrid({ onSwitchToList }) {
       videoRefs.current[i] = video;
     });
 
-    // Set initial UI
+    // Set initial text without scramble
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
     if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
     if (counterEl) counterEl.textContent = '[PROJECT 01]';
-
-    // Load first video
-    loadVideoTexture(0);
-    // Preload second
-    if (items.length > 1) preloadVideo(1);
 
   }, [loading, items]);
 
@@ -173,7 +162,7 @@ export default function WorkGrid({ onSwitchToList }) {
     }, { once: true });
   }, []);
 
-  // Preload video silently
+  // Preload video
   const preloadVideo = useCallback((index) => {
     const allItems = itemsRef.current;
     const item = allItems[index];
@@ -185,7 +174,7 @@ export default function WorkGrid({ onSwitchToList }) {
     video.load();
   }, []);
 
-  // Blast grid distortion
+  // Blast distortion
   const blast = useCallback(() => {
     const s = stateRef.current;
     const d = s.gridData;
@@ -197,7 +186,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (s.dataTexture) s.dataTexture.needsUpdate = true;
   }, []);
 
-  // Navigate to index
+  // Navigate
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -208,25 +197,20 @@ export default function WorkGrid({ onSwitchToList }) {
     const wrapped = ((newIndex % total) + total) % total;
     const stack = document.querySelector('.video-stack');
 
-    // Blast on exit
     blast();
 
     setTimeout(() => {
-      // Hide current video
       if (stack) {
         const current = stack.children[s.currentIndex];
         if (current) { current.style.opacity = 0; current.style.zIndex = 0; }
       }
 
-      // Pause current video
       const currentVideo = videoRefs.current[s.currentIndex];
       if (currentVideo) currentVideo.pause();
 
-      // Blast on entry
       blast();
 
       setTimeout(() => {
-        // Show new video
         if (stack) {
           const next = stack.children[wrapped];
           if (next) { next.style.opacity = 1; next.style.zIndex = 1; }
@@ -234,9 +218,8 @@ export default function WorkGrid({ onSwitchToList }) {
 
         s.currentIndex = wrapped;
         loadVideoTexture(wrapped);
-        updateUI(allItems[wrapped], wrapped, total);
+        updateUI(allItems[wrapped], wrapped);
 
-        // Preload next
         const nextIdx = ((wrapped + 1) % total + total) % total;
         preloadVideo(nextIdx);
 
@@ -245,7 +228,7 @@ export default function WorkGrid({ onSwitchToList }) {
     }, 300);
   }, [blast, loadVideoTexture, updateUI, preloadVideo]);
 
-  // Setup Three.js on work-canvas
+  // Setup Three.js — copied from GridDistortion.jsx
   useEffect(() => {
     if (loading || !items.length) return;
     const s = stateRef.current;
@@ -253,7 +236,11 @@ export default function WorkGrid({ onSwitchToList }) {
     const canvasContainer = document.querySelector('.work-canvas');
     if (!canvasContainer) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
     canvasContainer.appendChild(renderer.domElement);
@@ -262,6 +249,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
     camera.position.z = 2;
 
+    // Initialize grid data to zero — no green tint on load
     const gridData = new Float32Array(4 * GRID * GRID);
     const dataTexture = new THREE.DataTexture(
       gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
@@ -295,10 +283,12 @@ export default function WorkGrid({ onSwitchToList }) {
       const W = window.innerWidth;
       const H = window.innerHeight;
       renderer.setSize(W, H);
-      const aspect = W / H;
-      plane.scale.set(aspect, 1, 1);
+
+      const containerAspect = W / H;
+      plane.scale.set(containerAspect, 1, 1);
+
       const frustumH = 1;
-      const frustumW = frustumH * aspect;
+      const frustumW = frustumH * containerAspect;
       camera.left = -frustumW / 2;
       camera.right = frustumW / 2;
       camera.top = frustumH / 2;
@@ -309,8 +299,9 @@ export default function WorkGrid({ onSwitchToList }) {
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // Now safe to load first video
+    // Load first video after uniforms exist
     loadVideoTexture(0);
+    if (items.length > 1) preloadVideo(1);
 
     const animate = () => {
       s.animId = requestAnimationFrame(animate);
@@ -349,9 +340,9 @@ export default function WorkGrid({ onSwitchToList }) {
       canvasContainer.innerHTML = '';
       renderer.dispose();
     };
-  }, [loading, items, loadVideoTexture]);
+  }, [loading, items, loadVideoTexture, preloadVideo]);
 
-  // Scroll handling
+  // Scroll
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -359,17 +350,17 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (s.isListView) return; // ignore scroll in list view
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
       if (s.transitioning) return;
-      const delta = Math.abs(e.deltaY);
-      if (delta < 30) return;
+      if (Math.abs(e.deltaY) < 30) return;
       s.lastScrollTime = now;
-      const direction = e.deltaY > 0 ? 1 : -1;
-      navigateTo(s.currentIndex + direction);
+      navigateTo(s.currentIndex + (e.deltaY > 0 ? 1 : -1));
     };
 
     const handleKeyDown = (e) => {
+      if (s.isListView) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
     };
@@ -401,7 +392,7 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Toggle handlers — wire up Webflow buttons
+  // Grid/List toggle — fix: properly show/hide without destroying nav
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -410,14 +401,25 @@ export default function WorkGrid({ onSwitchToList }) {
 
     if (!btnGrid || !btnList) return;
 
-    const showGrid = () => {
-      if (gridWrap) gridWrap.style.display = 'block';
+    const showGrid = (e) => {
+      e.stopPropagation();
+      stateRef.current.isListView = false;
+      if (gridWrap) gridWrap.style.display = '';
       if (listWrap) listWrap.style.display = 'none';
     };
 
-    const showList = () => {
+    const showList = (e) => {
+      e.stopPropagation();
+      stateRef.current.isListView = true;
       if (gridWrap) gridWrap.style.display = 'none';
-      if (listWrap) listWrap.style.display = 'block';
+      if (listWrap) {
+        listWrap.style.display = '';
+        listWrap.style.position = 'fixed';
+        listWrap.style.inset = '0';
+        listWrap.style.width = '100vw';
+        listWrap.style.height = '100vh';
+        listWrap.style.zIndex = '50';
+      }
       onSwitchToList?.();
     };
 
@@ -430,7 +432,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [onSwitchToList]);
 
-  // Click to open project — will trigger Barba.js later
+  // Click to open project
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -440,15 +442,12 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleClick = () => {
       if (s.transitioning) return;
       const item = itemsRef.current[s.currentIndex];
-      if (item) {
-        window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
-      }
+      if (item) window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
     };
 
     stack.addEventListener('click', handleClick);
     return () => stack.removeEventListener('click', handleClick);
   }, [items]);
 
-  // No JSX output — everything is in Webflow DOM
   return null;
 }
