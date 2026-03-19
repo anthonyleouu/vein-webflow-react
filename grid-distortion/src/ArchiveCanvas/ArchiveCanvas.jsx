@@ -381,9 +381,6 @@ export default function ArchiveCanvas() {
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
-          const isActive = s.activeCol === col && s.activeRow === row;
-          if (isActive) continue;
-
           const opacity = s._locked ? s.globalOpacity : 1;
 
           if (img) {
