@@ -293,16 +293,17 @@ export default function WorkGrid({ onSwitchToList }) {
   const s = stateRef.current;
 
   const handleWheel = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (s.transitioning) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (s.transitioning) return;
 
-    const delta = Math.abs(e.deltaY);
-    if (delta < 50) return; // ignore tiny accidental scrolls
+  const delta = Math.abs(e.deltaY);
+  if (delta < 50) return;
 
-    const direction = e.deltaY > 0 ? 1 : -1;
-    navigateTo(s.currentIndex + direction);
-  };
+  const direction = e.deltaY > 0 ? 1 : -1;
+  navigateTo(s.currentIndex + direction);
+  s.transitioning = true; // lock immediately, don't wait for setTimeout
+};
 
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
