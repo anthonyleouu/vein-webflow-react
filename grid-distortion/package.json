@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "hls.js": "^1.6.15",
     "mathjs": "^15.1.1",
     "ogl": "^1.0.11",
     "react": "^19.2.4",

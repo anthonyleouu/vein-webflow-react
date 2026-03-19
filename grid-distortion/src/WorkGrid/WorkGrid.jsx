@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import './WorkGrid.css';
 import * as THREE from 'three';
+import Hls from 'hls.js';
 
 const vertexShader = `
   uniform float time;
@@ -26,11 +27,34 @@ const fragmentShader = `
 const SCROLL_DURATION_THRESHOLD = 300;
 const GRID = 15;
 
+// Attach hls.js to a video element for a given .m3u8 URL
+// Returns the Hls instance so it can be destroyed on cleanup
+function attachHls(video, url) {
+  if (!url) return null;
+
+  // If the browser supports HLS natively (Safari), just set src
+  if (!url.includes('.m3u8') || !Hls.isSupported()) {
+    video.src = url;
+    return null;
+  }
+
+  const hls = new Hls({
+    autoStartLoad: true,
+    startLevel: -1,
+    maxBufferLength: 10,
+  });
+  hls.loadSource(url);
+  hls.attachMedia(video);
+  return hls;
+}
+
 export default function WorkGrid({ onSwitchToList }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
   const videoRefs = useRef([]);
+  const hlsRefs = useRef([]); // track hls instances for cleanup
   const itemsRef = useRef([]);
+
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
@@ -60,10 +84,7 @@ export default function WorkGrid({ onSwitchToList }) {
   const [cursorPos, setCursorPos] = useState({ x: -300, y: -300 });
   const [cursorVisible, setCursorVisible] = useState(false);
 
-  // Keep itemsRef in sync so callbacks always have fresh items
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   // Fetch work items
   useEffect(() => {
@@ -82,7 +103,7 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Scramble text effect
+  // Scramble text
   const scrambleText = useCallback((target, setText) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let frame = 0;
@@ -103,7 +124,7 @@ export default function WorkGrid({ onSwitchToList }) {
     animate();
   }, []);
 
-  // Load video texture — reads from itemsRef so it's never stale
+  // Load video — attaches hls.js and plays
   const loadVideoTexture = useCallback((index) => {
     const s = stateRef.current;
     if (!s.uniforms) return;
@@ -113,20 +134,43 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!item?.videoUrl) return;
     const video = videoRefs.current[index];
     if (!video) return;
-    video.play().catch(() => {});
+
+    // Destroy existing hls instance for this slot if any
+    if (hlsRefs.current[index]) {
+      hlsRefs.current[index].destroy();
+      hlsRefs.current[index] = null;
+    }
+
+    const hls = attachHls(video, item.videoUrl);
+    if (hls) hlsRefs.current[index] = hls;
+
+    // Play after media is ready
+    const tryPlay = () => video.play().catch(() => {});
+    if (video.readyState >= 2) {
+      tryPlay();
+    } else {
+      video.addEventListener('canplay', tryPlay, { once: true });
+    }
+
     const texture = new THREE.VideoTexture(video);
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     s.uniforms.uTexture.value = texture;
   }, []);
 
-  // Preload next video
+  // Preload next video silently
   const preloadVideo = useCallback((index) => {
+    const allItems = itemsRef.current;
+    const item = allItems[index];
+    if (!item?.videoUrl) return;
     const video = videoRefs.current[index];
-    if (video) video.load();
+    if (!video || hlsRefs.current[index]) return; // already loaded
+
+    const hls = attachHls(video, item.videoUrl);
+    if (hls) hlsRefs.current[index] = hls;
   }, []);
 
-  // Navigate — reads from itemsRef so it's never stale
+  // Navigate
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -136,7 +180,6 @@ export default function WorkGrid({ onSwitchToList }) {
     const total = allItems.length;
     const wrapped = ((newIndex % total) + total) % total;
 
-    // Blast distortion on exit
     const d = s.gridData;
     if (d) {
       for (let i = 0; i < GRID * GRID; i++) {
@@ -150,7 +193,6 @@ export default function WorkGrid({ onSwitchToList }) {
       s.currentIndex = wrapped;
       setCurrentIndex(wrapped);
 
-      // Pause all other videos
       videoRefs.current.forEach((v, i) => {
         if (v && i !== wrapped) v.pause();
       });
@@ -159,7 +201,6 @@ export default function WorkGrid({ onSwitchToList }) {
       scrambleText(allItems[wrapped].name || '', setTitleText);
       setCategoryText(allItems[wrapped].category || '');
 
-      // Blast distortion on entry
       if (d) {
         for (let i = 0; i < GRID * GRID; i++) {
           d[i * 4] = (Math.random() - 0.5) * 500;
@@ -168,7 +209,6 @@ export default function WorkGrid({ onSwitchToList }) {
         if (s.dataTexture) s.dataTexture.needsUpdate = true;
       }
 
-      // Preload next
       const nextIdx = ((wrapped + 1) % total + total) % total;
       preloadVideo(nextIdx);
 
@@ -176,7 +216,7 @@ export default function WorkGrid({ onSwitchToList }) {
     }, 300);
   }, [loadVideoTexture, scrambleText, preloadVideo]);
 
-  // Setup Three.js — runs after items load
+  // Setup Three.js
   useEffect(() => {
     if (loading || !itemsRef.current.length || !canvasRef.current) return;
     const s = stateRef.current;
@@ -192,7 +232,9 @@ export default function WorkGrid({ onSwitchToList }) {
     camera.position.z = 2;
 
     const gridData = new Float32Array(4 * GRID * GRID);
-    const dataTexture = new THREE.DataTexture(gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType);
+    const dataTexture = new THREE.DataTexture(
+      gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
+    );
     dataTexture.needsUpdate = true;
 
     const uniforms = {
@@ -202,7 +244,10 @@ export default function WorkGrid({ onSwitchToList }) {
       uDataTexture: { value: dataTexture },
     };
 
-    const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, transparent: true, side: THREE.DoubleSide });
+    const material = new THREE.ShaderMaterial({
+      uniforms, vertexShader, fragmentShader,
+      transparent: true, side: THREE.DoubleSide,
+    });
     const geometry = new THREE.PlaneGeometry(1, 1, GRID - 1, GRID - 1);
     const plane = new THREE.Mesh(geometry, material);
     scene.add(plane);
@@ -233,7 +278,7 @@ export default function WorkGrid({ onSwitchToList }) {
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // NOW safe to load first video — uniforms exist
+    // Load first video now that uniforms exist
     loadVideoTexture(0);
 
     const animate = () => {
@@ -251,10 +296,10 @@ export default function WorkGrid({ onSwitchToList }) {
         for (let j = 0; j < GRID; j++) {
           const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
           if (distSq < maxDist * maxDist) {
-            const index = 4 * (i + GRID * j);
+            const idx = 4 * (i + GRID * j);
             const power = Math.min(maxDist / Math.sqrt(distSq), 10);
-            d[index] += 0.15 * 100 * s.mouseVX * power;
-            d[index + 1] -= 0.15 * 100 * s.mouseVY * power;
+            d[idx] += 0.15 * 100 * s.mouseVX * power;
+            d[idx + 1] -= 0.15 * 100 * s.mouseVY * power;
           }
         }
       }
@@ -266,11 +311,13 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => {
       cancelAnimationFrame(s.animId);
       window.removeEventListener('resize', handleResize);
+      // Destroy all hls instances
+      hlsRefs.current.forEach(h => h?.destroy());
       renderer.dispose();
     };
   }, [loading, loadVideoTexture]);
 
-  // Scroll with duration threshold — FIX: use wheel timeout, not pointerup
+  // Scroll handling
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -279,21 +326,16 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       if (s.transitioning) return;
-
       const direction = e.deltaY > 0 ? 1 : -1;
-
       if (!s.scrollHoldStart) {
         s.scrollHoldStart = Date.now();
         s.scrollDirection = direction;
       }
-
-      // Clear the reset timer on each wheel event
       clearTimeout(wheelTimeout);
       wheelTimeout = setTimeout(() => {
         s.scrollHoldStart = null;
         s.scrollDirection = null;
       }, 150);
-
       const held = Date.now() - s.scrollHoldStart;
       if (held >= SCROLL_DURATION_THRESHOLD) {
         navigateTo(s.currentIndex + s.scrollDirection);
@@ -310,7 +352,6 @@ export default function WorkGrid({ onSwitchToList }) {
 
     window.addEventListener('wheel', handleWheel, { passive: false });
     window.addEventListener('keydown', handleKeyDown);
-
     return () => {
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeyDown);
@@ -353,6 +394,7 @@ export default function WorkGrid({ onSwitchToList }) {
       onMouseEnter={() => setCursorVisible(true)}
       onMouseLeave={() => setCursorVisible(false)}
     >
+      {/* Video elements — no src, hls.js attaches after mount */}
       {items.map((item, i) => (
         <div
           key={item.id}
@@ -361,11 +403,9 @@ export default function WorkGrid({ onSwitchToList }) {
         >
           <video
             ref={el => videoRefs.current[i] = el}
-            src={item.videoUrl}
             muted
             loop
             playsInline
-            crossOrigin="anonymous"
           />
         </div>
       ))}
@@ -383,7 +423,10 @@ export default function WorkGrid({ onSwitchToList }) {
 
       <div className="work-grid-toggle">
         <button className="active" onClick={e => e.stopPropagation()}>GRID</button>
-        <button className="inactive" onClick={e => { e.stopPropagation(); onSwitchToList?.(); }}>LIST</button>
+        <button
+          className="inactive"
+          onClick={e => { e.stopPropagation(); onSwitchToList?.(); }}
+        >LIST</button>
       </div>
 
       <div
