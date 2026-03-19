@@ -291,19 +291,24 @@ export default function WorkGrid({ onSwitchToList }) {
   useEffect(() => {
   if (!items.length) return;
   const s = stateRef.current;
+  let lastScrollTime = 0;
+  const COOLDOWN = 800; // ms between navigations
 
   const handleWheel = (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (s.transitioning) return;
+    e.preventDefault();
+    e.stopPropagation();
 
-  const delta = Math.abs(e.deltaY);
-  if (delta < 50) return;
+    const now = Date.now();
+    if (now - lastScrollTime < COOLDOWN) return;
+    if (s.transitioning) return;
 
-  const direction = e.deltaY > 0 ? 1 : -1;
-  navigateTo(s.currentIndex + direction);
-  s.transitioning = true; // lock immediately, don't wait for setTimeout
-};
+    const delta = Math.abs(e.deltaY);
+    if (delta < 30) return;
+
+    lastScrollTime = now;
+    const direction = e.deltaY > 0 ? 1 : -1;
+    navigateTo(s.currentIndex + direction);
+  };
 
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
