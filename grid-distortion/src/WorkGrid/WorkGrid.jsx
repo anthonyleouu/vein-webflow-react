@@ -124,39 +124,62 @@ export default function WorkGrid({ onSwitchToList }) {
     animate();
   }, []);
 
-  // Load video — attaches hls.js and plays
   const loadVideoTexture = useCallback((index) => {
-    const s = stateRef.current;
-    if (!s.uniforms) return;
-    const allItems = itemsRef.current;
-    if (!allItems.length) return;
-    const item = allItems[index];
-    if (!item?.videoUrl) return;
-    const video = videoRefs.current[index];
-    if (!video) return;
+  const s = stateRef.current;
+  if (!s.uniforms) return;
+  const allItems = itemsRef.current;
+  if (!allItems.length) return;
+  const item = allItems[index];
+  if (!item?.videoUrl) return;
+  const video = videoRefs.current[index];
+  if (!video) return;
 
-    // Destroy existing hls instance for this slot if any
-    if (hlsRefs.current[index]) {
-      hlsRefs.current[index].destroy();
+  // Destroy existing hls instance for this slot if any
+  if (hlsRefs.current[index]) {
+    hlsRefs.current[index].destroy();
+    hlsRefs.current[index] = null;
+  }
+
+  // Create texture immediately — Three.js will pick up frames as they arrive
+  const texture = new THREE.VideoTexture(video);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  s.uniforms.uTexture.value = texture;
+
+  if (!item.videoUrl.includes('.m3u8') || !Hls.isSupported()) {
+    // Native HLS (Safari) or plain mp4
+    video.src = item.videoUrl;
+    video.load();
+    video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true });
+    return;
+  }
+
+  const hls = new Hls({
+    autoStartLoad: true,
+    startLevel: -1,
+    maxBufferLength: 10,
+  });
+
+  // Wait for manifest to parse before playing
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    video.play().catch(() => {});
+  });
+
+  // If hls errors, try native fallback
+  hls.on(Hls.Events.ERROR, (event, data) => {
+    if (data.fatal) {
+      hls.destroy();
       hlsRefs.current[index] = null;
+      video.src = item.videoUrl;
+      video.load();
+      video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true });
     }
+  });
 
-    const hls = attachHls(video, item.videoUrl);
-    if (hls) hlsRefs.current[index] = hls;
-
-    // Play after media is ready
-    const tryPlay = () => video.play().catch(() => {});
-    if (video.readyState >= 2) {
-      tryPlay();
-    } else {
-      video.addEventListener('canplay', tryPlay, { once: true });
-    }
-
-    const texture = new THREE.VideoTexture(video);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    s.uniforms.uTexture.value = texture;
-  }, []);
+  hls.loadSource(item.videoUrl);
+  hls.attachMedia(video);
+  hlsRefs.current[index] = hls;
+}, []);
 
   // Preload next video silently
   const preloadVideo = useCallback((index) => {
