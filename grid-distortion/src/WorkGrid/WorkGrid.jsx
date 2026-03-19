@@ -23,26 +23,25 @@ const fragmentShader = `
   }
 `;
 
-const SCROLL_DURATION_THRESHOLD = 300; // ms hold before triggering
+const SCROLL_DURATION_THRESHOLD = 300;
 const GRID = 15;
 
 export default function WorkGrid({ onSwitchToList }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
   const videoRefs = useRef([]);
+  const itemsRef = useRef([]);
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
-    scrollAccum: 0,
-    scrollTimer: null,
     scrollHoldStart: null,
+    scrollDirection: null,
     mouseX: 0,
     mouseY: 0,
     prevMouseX: 0,
     prevMouseY: 0,
     mouseVX: 0,
     mouseVY: 0,
-    // Three.js
     renderer: null,
     scene: null,
     camera: null,
@@ -52,6 +51,7 @@ export default function WorkGrid({ onSwitchToList }) {
     animId: null,
     gridData: null,
   });
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -60,15 +60,22 @@ export default function WorkGrid({ onSwitchToList }) {
   const [cursorPos, setCursorPos] = useState({ x: -300, y: -300 });
   const [cursorVisible, setCursorVisible] = useState(false);
 
+  // Keep itemsRef in sync so callbacks always have fresh items
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
   // Fetch work items
   useEffect(() => {
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
       .then(data => {
-        setItems(data.items || []);
-        if (data.items?.length) {
-          setTitleText(data.items[0].name || '');
-          setCategoryText(data.items[0].category || '');
+        const fetched = data.items || [];
+        setItems(fetched);
+        itemsRef.current = fetched;
+        if (fetched.length) {
+          setTitleText(fetched[0].name || '');
+          setCategoryText(fetched[0].category || '');
         }
         setLoading(false);
       })
@@ -81,12 +88,8 @@ export default function WorkGrid({ onSwitchToList }) {
     let frame = 0;
     const totalFrames = 20;
     const original = target.toUpperCase();
-
     const animate = () => {
-      if (frame >= totalFrames) {
-        setText(original);
-        return;
-      }
+      if (frame >= totalFrames) { setText(original); return; }
       const progress = frame / totalFrames;
       const result = original.split('').map((char, i) => {
         if (char === ' ') return ' ';
@@ -100,17 +103,86 @@ export default function WorkGrid({ onSwitchToList }) {
     animate();
   }, []);
 
-  // Setup Three.js WebGL distortion
+  // Load video texture — reads from itemsRef so it's never stale
+  const loadVideoTexture = useCallback((index) => {
+    const s = stateRef.current;
+    if (!s.uniforms) return;
+    const allItems = itemsRef.current;
+    if (!allItems.length) return;
+    const item = allItems[index];
+    if (!item?.videoUrl) return;
+    const video = videoRefs.current[index];
+    if (!video) return;
+    video.play().catch(() => {});
+    const texture = new THREE.VideoTexture(video);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    s.uniforms.uTexture.value = texture;
+  }, []);
+
+  // Preload next video
+  const preloadVideo = useCallback((index) => {
+    const video = videoRefs.current[index];
+    if (video) video.load();
+  }, []);
+
+  // Navigate — reads from itemsRef so it's never stale
+  const navigateTo = useCallback((newIndex) => {
+    const s = stateRef.current;
+    const allItems = itemsRef.current;
+    if (s.transitioning || !allItems.length) return;
+    s.transitioning = true;
+
+    const total = allItems.length;
+    const wrapped = ((newIndex % total) + total) % total;
+
+    // Blast distortion on exit
+    const d = s.gridData;
+    if (d) {
+      for (let i = 0; i < GRID * GRID; i++) {
+        d[i * 4] = (Math.random() - 0.5) * 500;
+        d[i * 4 + 1] = (Math.random() - 0.5) * 500;
+      }
+      if (s.dataTexture) s.dataTexture.needsUpdate = true;
+    }
+
+    setTimeout(() => {
+      s.currentIndex = wrapped;
+      setCurrentIndex(wrapped);
+
+      // Pause all other videos
+      videoRefs.current.forEach((v, i) => {
+        if (v && i !== wrapped) v.pause();
+      });
+
+      loadVideoTexture(wrapped);
+      scrambleText(allItems[wrapped].name || '', setTitleText);
+      setCategoryText(allItems[wrapped].category || '');
+
+      // Blast distortion on entry
+      if (d) {
+        for (let i = 0; i < GRID * GRID; i++) {
+          d[i * 4] = (Math.random() - 0.5) * 500;
+          d[i * 4 + 1] = (Math.random() - 0.5) * 500;
+        }
+        if (s.dataTexture) s.dataTexture.needsUpdate = true;
+      }
+
+      // Preload next
+      const nextIdx = ((wrapped + 1) % total + total) % total;
+      preloadVideo(nextIdx);
+
+      setTimeout(() => { s.transitioning = false; }, 400);
+    }, 300);
+  }, [loadVideoTexture, scrambleText, preloadVideo]);
+
+  // Setup Three.js — runs after items load
   useEffect(() => {
-    if (loading || !items.length || !canvasRef.current) return;
+    if (loading || !itemsRef.current.length || !canvasRef.current) return;
     const s = stateRef.current;
     const canvas = canvasRef.current;
 
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: true,
-    });
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -120,9 +192,7 @@ export default function WorkGrid({ onSwitchToList }) {
     camera.position.z = 2;
 
     const gridData = new Float32Array(4 * GRID * GRID);
-    const dataTexture = new THREE.DataTexture(
-      gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
-    );
+    const dataTexture = new THREE.DataTexture(gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType);
     dataTexture.needsUpdate = true;
 
     const uniforms = {
@@ -132,14 +202,7 @@ export default function WorkGrid({ onSwitchToList }) {
       uDataTexture: { value: dataTexture },
     };
 
-    const material = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader,
-      fragmentShader,
-      transparent: true,
-      side: THREE.DoubleSide,
-    });
-
+    const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, transparent: true, side: THREE.DoubleSide });
     const geometry = new THREE.PlaneGeometry(1, 1, GRID - 1, GRID - 1);
     const plane = new THREE.Mesh(geometry, material);
     scene.add(plane);
@@ -156,10 +219,8 @@ export default function WorkGrid({ onSwitchToList }) {
       const W = window.innerWidth;
       const H = window.innerHeight;
       renderer.setSize(W, H);
-
       const aspect = W / H;
       plane.scale.set(aspect, 1, 1);
-
       const frustumH = 1;
       const frustumW = frustumH * aspect;
       camera.left = -frustumW / 2;
@@ -172,24 +233,20 @@ export default function WorkGrid({ onSwitchToList }) {
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // Load first video texture
+    // NOW safe to load first video — uniforms exist
     loadVideoTexture(0);
 
-    // Animate
     const animate = () => {
       s.animId = requestAnimationFrame(animate);
       uniforms.time.value += 0.05;
-
       const d = gridData;
       for (let i = 0; i < GRID * GRID; i++) {
         d[i * 4] *= 0.9;
         d[i * 4 + 1] *= 0.9;
       }
-
       const gridMouseX = GRID * (s.mouseX / window.innerWidth);
       const gridMouseY = GRID * (1 - s.mouseY / window.innerHeight);
       const maxDist = GRID * 0.1;
-
       for (let i = 0; i < GRID; i++) {
         for (let j = 0; j < GRID; j++) {
           const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
@@ -201,7 +258,6 @@ export default function WorkGrid({ onSwitchToList }) {
           }
         }
       }
-
       dataTexture.needsUpdate = true;
       renderer.render(scene, camera);
     };
@@ -212,83 +268,13 @@ export default function WorkGrid({ onSwitchToList }) {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [loading, items]);
+  }, [loading, loadVideoTexture]);
 
-  const loadVideoTexture = useCallback((index) => {
-    const s = stateRef.current;
-    if (!s.uniforms || !items.length) return;
-
-    const item = items[index];
-    if (!item?.videoUrl) return;
-
-    const video = videoRefs.current[index];
-    if (!video) return;
-
-    video.play().catch(() => {});
-
-    const texture = new THREE.VideoTexture(video);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    s.uniforms.uTexture.value = texture;
-  }, [items]);
-
-  // Preload next video
-  const preloadVideo = useCallback((index) => {
-    const video = videoRefs.current[index];
-    if (video) video.load();
-  }, []);
-
-  // Navigate to next/prev project
-  const navigateTo = useCallback((newIndex, items) => {
-    const s = stateRef.current;
-    if (s.transitioning) return;
-    s.transitioning = true;
-
-    const totalItems = items.length;
-    const wrappedIndex = ((newIndex % totalItems) + totalItems) % totalItems;
-
-    // Blast the grid distortion on exit
-    const d = s.gridData;
-    if (d) {
-      for (let i = 0; i < GRID * GRID; i++) {
-        d[i * 4] = (Math.random() - 0.5) * 500;
-        d[i * 4 + 1] = (Math.random() - 0.5) * 500;
-      }
-      if (s.dataTexture) s.dataTexture.needsUpdate = true;
-    }
-
-    setTimeout(() => {
-      s.currentIndex = wrappedIndex;
-      setCurrentIndex(wrappedIndex);
-      loadVideoTexture(wrappedIndex);
-
-      // Scramble new title
-      scrambleText(items[wrappedIndex].name || '', setTitleText);
-      setCategoryText(items[wrappedIndex].category || '');
-
-      // Blast distortion again on entry
-      if (d) {
-        for (let i = 0; i < GRID * GRID; i++) {
-          d[i * 4] = (Math.random() - 0.5) * 500;
-          d[i * 4 + 1] = (Math.random() - 0.5) * 500;
-        }
-        if (s.dataTexture) s.dataTexture.needsUpdate = true;
-      }
-
-      // Preload next
-      const nextIndex = ((wrappedIndex + 1) % totalItems + totalItems) % totalItems;
-      preloadVideo(nextIndex);
-
-      setTimeout(() => {
-        s.transitioning = false;
-      }, 400);
-    }, 300);
-  }, [loadVideoTexture, scrambleText, preloadVideo]);
-
-  // Scroll handling with duration threshold
+  // Scroll with duration threshold — FIX: use wheel timeout, not pointerup
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
+    let wheelTimeout = null;
 
     const handleWheel = (e) => {
       e.preventDefault();
@@ -301,37 +287,34 @@ export default function WorkGrid({ onSwitchToList }) {
         s.scrollDirection = direction;
       }
 
-      const held = Date.now() - s.scrollHoldStart;
-
-      if (held >= SCROLL_DURATION_THRESHOLD) {
-        navigateTo(s.currentIndex + s.scrollDirection, items);
+      // Clear the reset timer on each wheel event
+      clearTimeout(wheelTimeout);
+      wheelTimeout = setTimeout(() => {
         s.scrollHoldStart = null;
         s.scrollDirection = null;
+      }, 150);
+
+      const held = Date.now() - s.scrollHoldStart;
+      if (held >= SCROLL_DURATION_THRESHOLD) {
+        navigateTo(s.currentIndex + s.scrollDirection);
+        s.scrollHoldStart = null;
+        s.scrollDirection = null;
+        clearTimeout(wheelTimeout);
       }
     };
 
     const handleKeyDown = (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-        navigateTo(s.currentIndex + 1, items);
-      }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        navigateTo(s.currentIndex - 1, items);
-      }
-    };
-
-    const handleScrollEnd = () => {
-      stateRef.current.scrollHoldStart = null;
-      stateRef.current.scrollDirection = null;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
     };
 
     window.addEventListener('wheel', handleWheel, { passive: false });
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('pointerup', handleScrollEnd);
 
     return () => {
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('pointerup', handleScrollEnd);
+      clearTimeout(wheelTimeout);
     };
   }, [items, navigateTo]);
 
@@ -354,16 +337,13 @@ export default function WorkGrid({ onSwitchToList }) {
   // Click to open project
   const handleClick = useCallback(() => {
     const s = stateRef.current;
-    if (s.transitioning || !items.length) return;
-    const item = items[s.currentIndex];
-    if (item) {
-      window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
-    }
-  }, [items]);
+    const allItems = itemsRef.current;
+    if (s.transitioning || !allItems.length) return;
+    const item = allItems[s.currentIndex];
+    if (item) window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
+  }, []);
 
-  if (loading) {
-    return <div className="work-grid-loading">LOADING WORK...</div>;
-  }
+  if (loading) return <div className="work-grid-loading">LOADING WORK...</div>;
 
   return (
     <div
@@ -373,7 +353,6 @@ export default function WorkGrid({ onSwitchToList }) {
       onMouseEnter={() => setCursorVisible(true)}
       onMouseLeave={() => setCursorVisible(false)}
     >
-      {/* Video layers — all preloaded, only current visible */}
       {items.map((item, i) => (
         <div
           key={item.id}
@@ -383,7 +362,6 @@ export default function WorkGrid({ onSwitchToList }) {
           <video
             ref={el => videoRefs.current[i] = el}
             src={item.videoUrl}
-            autoPlay={i === 0}
             muted
             loop
             playsInline
@@ -392,39 +370,25 @@ export default function WorkGrid({ onSwitchToList }) {
         </div>
       ))}
 
-      {/* WebGL distortion canvas */}
       <canvas ref={canvasRef} className="work-grid-canvas" />
 
-      {/* Project title */}
       <div className="work-grid-title">
         <p className="work-grid-title-name">{titleText}</p>
         <p className="work-grid-title-category">{categoryText}</p>
       </div>
 
-      {/* Counter */}
       <div className="work-grid-counter">
         {String(currentIndex + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}
       </div>
 
-      {/* Layout toggle */}
       <div className="work-grid-toggle">
         <button className="active" onClick={e => e.stopPropagation()}>GRID</button>
-        <button
-          className="inactive"
-          onClick={e => { e.stopPropagation(); onSwitchToList?.(); }}
-        >
-          LIST
-        </button>
+        <button className="inactive" onClick={e => { e.stopPropagation(); onSwitchToList?.(); }}>LIST</button>
       </div>
 
-      {/* Custom cursor */}
       <div
         className="work-cursor"
-        style={{
-          left: cursorPos.x,
-          top: cursorPos.y,
-          opacity: cursorVisible ? 1 : 0,
-        }}
+        style={{ left: cursorPos.x, top: cursorPos.y, opacity: cursorVisible ? 1 : 0 }}
       >
         <div className="work-cursor-label">VIEW</div>
       </div>
