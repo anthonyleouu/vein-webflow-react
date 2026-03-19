@@ -64,11 +64,8 @@ const startBlockDistortion = (container, imageSrc, width, height) => {
   });
 
   const material = new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader,
-    fragmentShader,
-    transparent: true,
-    side: THREE.DoubleSide,
+    uniforms, vertexShader, fragmentShader,
+    transparent: true, side: THREE.DoubleSide,
   });
 
   const geometry = new THREE.PlaneGeometry(aspect, 1, grid - 1, grid - 1);
@@ -97,9 +94,7 @@ const startBlockDistortion = (container, imageSrc, width, height) => {
   const animate = () => {
     animId = requestAnimationFrame(animate);
     const d = dataTexture.image.data;
-    const mouse = 0.1;
-    const strength = 0.15;
-    const relaxation = 0.9;
+    const mouse = 0.1, strength = 0.15, relaxation = 0.9;
 
     for (let i = 0; i < grid * grid; i++) {
       d[i * 4] *= relaxation;
@@ -165,10 +160,20 @@ export default function ArchiveCanvas() {
     animating: false,
     targetX: 0,
     targetY: 0,
-    activeScale: 1,
-    targetScale: 1,
     globalOpacity: 1,
     targetOpacity: 1,
+    // Active block animation state
+    activeBlockX: 0,
+    activeBlockY: 0,
+    activeBlockTargetX: 0,
+    activeBlockTargetY: 0,
+    activeBlockW: 0,
+    activeBlockH: 0,
+    activeBlockTargetW: 0,
+    activeBlockTargetH: 0,
+    activeBlockImg: null,
+    activeBlockAnimating: false,
+    activeBlockDone: false,
   });
 
   useEffect(() => {
@@ -176,9 +181,7 @@ export default function ArchiveCanvas() {
     overlay.id = 'archive-canvas-overlay';
     overlay.style.cssText = `
       position: fixed; inset: 0;
-      z-index: 200;
-      display: none;
-      pointer-events: all;
+      z-index: 200; display: none; pointer-events: all;
     `;
     document.body.appendChild(overlay);
 
@@ -192,10 +195,11 @@ export default function ArchiveCanvas() {
         panel.style.opacity = '0';
       }
 
-      const activeImg = document.getElementById('archive-active-block');
-      if (activeImg) {
-        if (activeImg._destroyWebGL) activeImg._destroyWebGL();
-        activeImg.remove();
+      // Clean up WebGL overlay if exists
+      const webglOverlay = document.getElementById('archive-active-block');
+      if (webglOverlay) {
+        if (webglOverlay._destroyWebGL) webglOverlay._destroyWebGL();
+        webglOverlay.remove();
       }
 
       overlay.style.display = 'none';
@@ -203,10 +207,12 @@ export default function ArchiveCanvas() {
       s.animating = true;
       s.targetX = s.originX;
       s.targetY = s.originY;
-      s.targetScale = 1;
       s.targetOpacity = 1;
       s.activeCol = null;
       s.activeRow = null;
+      s.activeBlockAnimating = false;
+      s.activeBlockDone = false;
+      s.activeBlockImg = null;
 
       setTimeout(() => {
         s._locked = false;
@@ -227,7 +233,6 @@ export default function ArchiveCanvas() {
     };
     wireClose();
     setTimeout(wireClose, 1000);
-
     window._archiveClosePanel = closePanel;
 
     return () => {
@@ -302,7 +307,24 @@ export default function ArchiveCanvas() {
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
 
+    const drawImageCovered = (img, dx, dy, dw, dh, opacity = 1) => {
+      if (!img) return;
+      const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+      const sw = img.naturalWidth * scale;
+      const sh = img.naturalHeight * scale;
+      const sx = -(sw - dw) / 2;
+      const sy = -(sh - dh) / 2;
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.beginPath();
+      ctx.rect(dx, dy, dw, dh);
+      ctx.clip();
+      ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
+      ctx.restore();
+    };
+
     const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1) => {
+      if (!img) return;
       const scale2 = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
       const sw = img.naturalWidth * scale2;
       const sh = img.naturalHeight * scale2;
@@ -340,6 +362,8 @@ export default function ArchiveCanvas() {
       }
       ctx.restore();
     };
+
+    const EASE = 0.07;
 
     const drawFrame = () => {
       const W = canvas.width;
@@ -381,7 +405,10 @@ export default function ArchiveCanvas() {
           const verticalDominance = Math.abs(s.vy) / (Math.abs(s.vx) + Math.abs(s.vy) + 0.001);
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
-          const opacity = s._locked ? s.globalOpacity : 1;
+          const isActive = s.activeCol === col && s.activeRow === row;
+
+          // Always draw all blocks — active block drawn separately on top
+          const opacity = (s._locked && !isActive) ? s.globalOpacity : 1;
 
           if (img) {
             drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity);
@@ -392,6 +419,38 @@ export default function ArchiveCanvas() {
             ctx.fillRect(screenX, screenY, blockW, blockH);
             ctx.restore();
           }
+        }
+      }
+
+      // Draw active block on top — fully in canvas, no DOM flash possible
+      if (s.activeBlockAnimating && s.activeBlockImg && !s.activeBlockDone) {
+        s.activeBlockX += (s.activeBlockTargetX - s.activeBlockX) * EASE;
+        s.activeBlockY += (s.activeBlockTargetY - s.activeBlockY) * EASE;
+        s.activeBlockW += (s.activeBlockTargetW - s.activeBlockW) * EASE;
+        s.activeBlockH += (s.activeBlockTargetH - s.activeBlockH) * EASE;
+
+        drawImageCovered(s.activeBlockImg, s.activeBlockX, s.activeBlockY, s.activeBlockW, s.activeBlockH, 1);
+
+        // Check if animation is complete
+        const dx = Math.abs(s.activeBlockX - s.activeBlockTargetX);
+        const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
+        if (dx < 0.5 && dy < 0.5 && window.innerWidth >= 1024) {
+          s.activeBlockDone = true;
+
+          // Switch to WebGL DOM overlay once animation is complete
+          const webglContainer = document.createElement('div');
+          webglContainer.id = 'archive-active-block';
+          webglContainer.style.cssText = `
+            position: fixed;
+            z-index: 1003;
+            pointer-events: none;
+            left: ${s.activeBlockTargetX}px;
+            top: ${s.activeBlockTargetY}px;
+            width: ${s.activeBlockTargetW}px;
+            height: ${s.activeBlockTargetH}px;
+          `;
+          document.body.appendChild(webglContainer);
+          startBlockDistortion(webglContainer, s.activeBlockImg.src, s.activeBlockTargetW, s.activeBlockTargetH);
         }
       }
 
@@ -492,7 +551,6 @@ export default function ArchiveCanvas() {
         s._locked = true;
         s.activeCol = s.hoveredCol;
         s.activeRow = s.hoveredRow;
-
         s.originX = s.x;
         s.originY = s.y;
 
@@ -502,65 +560,28 @@ export default function ArchiveCanvas() {
 
         const targetBlockCenterX = window.innerWidth * 0.25;
         const targetBlockCenterY = window.innerHeight * 0.5;
-
-        s.targetX = s.x + (targetBlockCenterX - (currentBlockScreenX + blockW / 2));
-        s.targetY = s.y + (targetBlockCenterY - (currentBlockScreenY + blockH / 2));
-        // Pre-mark active block so canvas skips it only after DOM overlay exists
-        s._pendingActive = true;
-        s.animating = true;
-        s.targetOpacity = 0.6;
-
-        // Create DOM overlay for active block
-        let activeImg = document.getElementById('archive-active-block');
-        if (activeImg) {
-          if (activeImg._destroyWebGL) activeImg._destroyWebGL();
-          activeImg.remove();
-        }
-
         const scaledW = blockW * 1.2;
         const scaledH = blockH * 1.2;
         const targetLeft = targetBlockCenterX - scaledW / 2;
         const targetTop = targetBlockCenterY - scaledH / 2;
 
-        activeImg = document.createElement('div');
-activeImg.id = 'archive-active-block';
-activeImg.style.cssText = `
-  position: fixed;
-  z-index: 1003;
-  pointer-events: none;
-  background-image: url(${item.image});
-  background-size: cover;
-  background-position: center;
-  left: ${currentBlockScreenX}px;
-  top: ${currentBlockScreenY}px;
-  width: ${blockW}px;
-  height: ${blockH}px;
-`;
-document.body.appendChild(activeImg);
+        s.targetX = s.x + (targetBlockCenterX - (currentBlockScreenX + blockW / 2));
+        s.targetY = s.y + (targetBlockCenterY - (currentBlockScreenY + blockH / 2));
+        s.animating = true;
+        s.targetOpacity = 0.6;
 
-// Force a paint before adding transition so initial position is instant
-requestAnimationFrame(() => {
-  requestAnimationFrame(() => {
-    activeImg.style.transition = `
-      left 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-      top 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-      width 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-      height 0.7s cubic-bezier(0.16, 1, 0.3, 1)
-    `;
-    activeImg.style.left = targetLeft + 'px';
-    activeImg.style.top = targetTop + 'px';
-    activeImg.style.width = scaledW + 'px';
-    activeImg.style.height = scaledH + 'px';
-  });
-});
-
-        // Add WebGL distortion after block is in position (desktop only)
-        if (window.innerWidth >= 1024) {
-          setTimeout(() => {
-            activeImg.style.backgroundImage = 'none';
-            startBlockDistortion(activeImg, item.image, scaledW, scaledH);
-          }, 800);
-        }
+        // Start canvas-driven active block animation — zero flash
+        s.activeBlockX = currentBlockScreenX;
+        s.activeBlockY = currentBlockScreenY;
+        s.activeBlockW = blockW;
+        s.activeBlockH = blockH;
+        s.activeBlockTargetX = targetLeft;
+        s.activeBlockTargetY = targetTop;
+        s.activeBlockTargetW = scaledW;
+        s.activeBlockTargetH = scaledH;
+        s.activeBlockImg = s.images[item.id] || null;
+        s.activeBlockAnimating = true;
+        s.activeBlockDone = false;
 
         // Populate panel
         const title = document.getElementById('archive-panel-title');
