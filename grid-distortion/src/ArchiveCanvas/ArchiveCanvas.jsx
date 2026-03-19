@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
 import GradualBlur from '../GradualBlur/GradualBlur';
 
-const GAP = 10;
+const GAP = 8;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
 
@@ -205,11 +205,11 @@ export default function ArchiveCanvas() {
 
       if (warpAmount < 0.01) {
         ctx.beginPath();
-        ctx.rect(dx, dy, dw, dh);
+        ctx.roundRect(dx, dy, dw, dh, 2);
         ctx.clip();
         ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
         ctx.restore();
-        return;
+      return;
       }
 
       offscreen.width = dw;
@@ -221,7 +221,7 @@ export default function ArchiveCanvas() {
       const stripH = dh / strips;
 
       ctx.beginPath();
-      ctx.rect(dx, dy, dw, dh);
+      ctx.roundRect(dx, dy, dw, dh, 2);
       ctx.clip();
 
       for (let i = 0; i < strips; i++) {
