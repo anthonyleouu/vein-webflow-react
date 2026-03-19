@@ -1,15 +1,14 @@
 .work-grid-wrapper {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
   background: #000;
   cursor: none;
   z-index: 100;
 }
 
-/* Video layers */
 .work-grid-video-layer {
   position: absolute;
   inset: 0;
@@ -25,7 +24,6 @@
   object-fit: cover;
 }
 
-/* WebGL canvas overlay */
 .work-grid-canvas {
   position: absolute;
   inset: 0;
@@ -35,7 +33,6 @@
   z-index: 2;
 }
 
-/* Project title — top right */
 .work-grid-title {
   position: fixed;
   top: 2rem;
@@ -64,7 +61,6 @@
   margin: 0.25rem 0 0 0;
 }
 
-/* Counter — top center */
 .work-grid-counter {
   position: fixed;
   top: 2rem;
@@ -78,7 +74,6 @@
   pointer-events: none;
 }
 
-/* Layout toggle — below counter */
 .work-grid-toggle {
   position: fixed;
   top: 4rem;
@@ -117,7 +112,6 @@
   opacity: 0.7;
 }
 
-/* Custom cursor */
 .work-cursor {
   position: fixed;
   top: 0;
@@ -142,7 +136,6 @@
   white-space: nowrap;
 }
 
-/* Loading */
 .work-grid-loading {
   position: fixed;
   top: 50%;

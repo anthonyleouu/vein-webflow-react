@@ -112,6 +112,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const video = videoRefs.current[index];
     if (!video) return;
 
+    video.crossOrigin = 'anonymous';
     video.src = item.videoUrl;
     video.load();
 
@@ -132,6 +133,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!item?.videoUrl) return;
     const video = videoRefs.current[index];
     if (!video || video.src) return;
+    video.crossOrigin = 'anonymous';
     video.src = item.videoUrl;
     video.load();
   }, []);
@@ -368,6 +370,7 @@ export default function WorkGrid({ onSwitchToList }) {
             muted
             loop
             playsInline
+            crossOrigin="anonymous"
           />
         </div>
       ))}
