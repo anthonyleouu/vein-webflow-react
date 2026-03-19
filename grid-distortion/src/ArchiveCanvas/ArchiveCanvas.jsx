@@ -45,20 +45,16 @@ export default function ArchiveCanvas() {
     activeBlockImg: null,
     activeBlockAnimating: false,
     activeBlockSettled: false,
-    activeBlockDistortion: 0,
-    activeBlockTargetDistortion: 0,
+    gridData: null,
     mouseVX: 0,
     mouseVY: 0,
     lastMouseX: 0,
     lastMouseY: 0,
-    // Grid distortion data for active block
-    gridData: null,
   });
 
   useEffect(() => {
-    // Init grid distortion data
-    const grid = 15;
-    stateRef.current.gridData = new Float32Array(4 * grid * grid);
+    const GRID = 15;
+    stateRef.current.gridData = new Float32Array(4 * GRID * GRID);
 
     const overlay = document.createElement('div');
     overlay.id = 'archive-canvas-overlay';
@@ -89,8 +85,6 @@ export default function ArchiveCanvas() {
       s.activeBlockAnimating = false;
       s.activeBlockSettled = false;
       s.activeBlockImg = null;
-      s.activeBlockDistortion = 0;
-      s.activeBlockTargetDistortion = 0;
       if (s.gridData) s.gridData.fill(0);
 
       setTimeout(() => {
@@ -168,7 +162,6 @@ export default function ArchiveCanvas() {
     resize();
     window.addEventListener('resize', resize);
 
-    // Track mouse for distortion
     const onMouseMove = e => {
       s.mouseVX = e.clientX - s.lastMouseX;
       s.mouseVY = e.clientY - s.lastMouseY;
@@ -237,7 +230,6 @@ export default function ArchiveCanvas() {
       ctx.restore();
     };
 
-    // Draw active block with GridDistortion-style effect
     const drawActiveBlock = (img, dx, dy, dw, dh) => {
       if (!img) return;
 
@@ -247,8 +239,8 @@ export default function ArchiveCanvas() {
       const sx = -(sw - dw) / 2;
       const sy = -(sh - dh) / 2;
 
+      // Before settled or on mobile — draw normally
       if (!s.activeBlockSettled || window.innerWidth < 1024) {
-        // Just draw normally before settled or on mobile
         ctx.save();
         ctx.beginPath();
         ctx.rect(dx, dy, dw, dh);
@@ -272,7 +264,7 @@ export default function ArchiveCanvas() {
       const mouseXInBlock = s.lastMouseX - dx;
       const mouseYInBlock = s.lastMouseY - dy;
       const gridMouseX = GRID * (mouseXInBlock / dw);
-      const gridMouseY = GRID * (1 - mouseYInBlock / dh);
+      const gridMouseY = GRID * (mouseYInBlock / dh);
       const maxDist = GRID * mouse;
 
       for (let i = 0; i < GRID; i++) {
@@ -287,7 +279,7 @@ export default function ArchiveCanvas() {
         }
       }
 
-      // Draw with grid distortion using strips
+      // Draw with smooth strip distortion
       offscreen.width = dw;
       offscreen.height = dh;
       offCtx.clearRect(0, 0, dw, dh);
@@ -298,29 +290,24 @@ export default function ArchiveCanvas() {
       ctx.rect(dx, dy, dw, dh);
       ctx.clip();
 
-      const strips = GRID;
-      const stripW = dw / strips;
+      const strips = 60;
+      const stripH = dh / strips;
 
       for (let i = 0; i < strips; i++) {
-        for (let j = 0; j < strips; j++) {
-          const index = 4 * (i + GRID * j);
-          const offsetX = d[index] * dw * 0.02;
-          const offsetY = d[index + 1] * dh * 0.02;
-          const sx2 = i * stripW;
-          const sy2 = j * (dh / strips);
-          const sw2 = stripW + 1;
-          const sh2 = dh / strips + 1;
-          ctx.drawImage(
-            offscreen,
-            sx2, sy2, sw2, sh2,
-            dx + sx2 - offsetX, dy + sy2 - offsetY, sw2, sh2
-          );
-        }
+        const sy2 = i * stripH;
+        const gridRow = Math.floor((i / strips) * GRID);
+        const gridCol = Math.floor(GRID / 2);
+        const index = 4 * (gridCol + GRID * gridRow);
+        const waveX = d[index] * dw * 0.02;
+        ctx.drawImage(
+          offscreen,
+          0, sy2, dw, stripH + 1,
+          dx + waveX, dy + sy2, dw, stripH + 1
+        );
       }
 
       ctx.restore();
 
-      // Decay mouse velocity
       s.mouseVX *= 0.85;
       s.mouseVY *= 0.85;
     };
@@ -387,9 +374,9 @@ export default function ArchiveCanvas() {
         s.activeBlockW += (s.activeBlockTargetW - s.activeBlockW) * EASE;
         s.activeBlockH += (s.activeBlockTargetH - s.activeBlockH) * EASE;
 
-        const dx = Math.abs(s.activeBlockX - s.activeBlockTargetX);
-        const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
-        if (dx < 1 && dy < 1 && !s.activeBlockSettled) {
+        const ddx = Math.abs(s.activeBlockX - s.activeBlockTargetX);
+        const ddy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
+        if (ddx < 1 && ddy < 1 && !s.activeBlockSettled) {
           s.activeBlockSettled = true;
         }
 
@@ -529,7 +516,6 @@ export default function ArchiveCanvas() {
         s.activeBlockImg = s.images[item.id] || null;
         s.activeBlockAnimating = true;
         s.activeBlockSettled = false;
-        s.activeBlockDistortion = 0;
         if (s.gridData) s.gridData.fill(0);
 
         const title = document.getElementById('archive-panel-title');
