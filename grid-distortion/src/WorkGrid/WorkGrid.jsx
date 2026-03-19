@@ -31,6 +31,17 @@ const RELAXATION = 0.92;
 const BLAST_STRENGTH = 60;
 const SCROLL_COOLDOWN = 900;
 
+// Inject a style tag that wins over everything
+function injectStyle(id, css) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('style');
+    el.id = id;
+    document.head.appendChild(el);
+  }
+  el.textContent = css;
+}
+
 export default function WorkGrid({ onSwitchToList }) {
   const itemsRef = useRef([]);
   const videoRefs = useRef([]);
@@ -53,11 +64,66 @@ export default function WorkGrid({ onSwitchToList }) {
     gridData: null,
     lastScrollTime: 0,
     isListView: false,
-    canvasAlpha: 0,
   });
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Inject base styles on mount
+  useEffect(() => {
+    injectStyle('work-grid-styles', `
+      .work-list-wrap {
+        display: none;
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 50;
+        background: #000;
+      }
+      .work-list-wrap.wg-visible {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+      }
+      .work-list-view {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+      }
+      .video-list {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        height: 45vh;
+      }
+      .list-video-item {
+        width: 35vw;
+        height: 45vh;
+        flex-shrink: 0;
+        overflow: hidden;
+        position: relative;
+      }
+      .list-video-item video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .work-canvas canvas {
+        width: 100% !important;
+        height: 100% !important;
+      }
+      .grid-video-item video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+    `);
+  }, []);
 
   const scramble = useCallback((element, text) => {
     if (!element || !window.gsap) return;
@@ -87,7 +153,7 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements
+  // Build grid video elements
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -112,13 +178,6 @@ export default function WorkGrid({ onSwitchToList }) {
       video.loop = true;
       video.playsInline = true;
       video.crossOrigin = 'anonymous';
-      video.style.cssText = `
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      `;
 
       wrapper.appendChild(video);
       stack.appendChild(wrapper);
@@ -131,7 +190,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (counterEl) counterEl.textContent = '[PROJECT 01]';
   }, [loading, items]);
 
-  // Load video — fade in canvas only after video ready
   const loadVideoTexture = useCallback((index) => {
     const s = stateRef.current;
     if (!s.uniforms) return;
@@ -154,7 +212,6 @@ export default function WorkGrid({ onSwitchToList }) {
 
       s.uniforms.uTexture.value = texture;
 
-      // Proper cover scale using video aspect ratio
       const W = window.innerWidth;
       const H = window.innerHeight;
       const containerAspect = W / H;
@@ -170,7 +227,6 @@ export default function WorkGrid({ onSwitchToList }) {
       }
       if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
 
-      // Fade canvas in smoothly — no green flash
       s.uniforms.uAlpha.value = 0;
       const fadeIn = () => {
         if (s.uniforms.uAlpha.value < 1) {
@@ -197,7 +253,6 @@ export default function WorkGrid({ onSwitchToList }) {
     video.load();
   }, []);
 
-  // Subtle blast — exit only
   const blastExit = useCallback(() => {
     const s = stateRef.current;
     const d = s.gridData;
@@ -219,18 +274,15 @@ export default function WorkGrid({ onSwitchToList }) {
     const wrapped = ((newIndex % total) + total) % total;
     const stack = document.querySelector('.video-stack');
 
-    // Exit distortion only
     blastExit();
 
     setTimeout(() => {
-      // Hide current
       if (stack?.children[s.currentIndex]) {
         stack.children[s.currentIndex].style.opacity = 0;
         stack.children[s.currentIndex].style.zIndex = 0;
       }
       videoRefs.current[s.currentIndex]?.pause();
 
-      // Show next — no entry blast
       setTimeout(() => {
         if (stack?.children[wrapped]) {
           stack.children[wrapped].style.opacity = 1;
@@ -410,106 +462,89 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Grid/List toggle — no !important, uses className toggle
+  // Grid/List toggle
   useEffect(() => {
-  const btnGrid = document.querySelector('.btn-grid');
-  const btnList = document.querySelector('.btn-list');
-  const gridWrap = document.querySelector('.work-grid-wrap');
-  const listWrap = document.querySelector('.work-list-wrap');
-  const videoList = document.querySelector('.video-list');
+    const btnGrid = document.querySelector('.btn-grid');
+    const btnList = document.querySelector('.btn-list');
+    const listWrap = document.querySelector('.work-list-wrap');
+    const videoList = document.querySelector('.video-list');
 
-  if (!btnGrid || !btnList || !listWrap || !videoList) return;
+    if (!btnGrid || !btnList || !listWrap || !videoList) return;
 
-  const buildListVideos = () => {
-    // Clear and rebuild list videos
-    videoList.innerHTML = '';
-    itemsRef.current.forEach((item, i) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'list-video-item';
-      wrapper.style.cssText = `
-        width: 35vw;
-        height: 45vh;
-        flex-shrink: 0;
-        overflow: hidden;
-        position: relative;
-        opacity: 0;
-      `;
-
-      const video = document.createElement('video');
-      video.muted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.crossOrigin = 'anonymous';
-      video.src = item.videoUrl;
-      video.style.cssText = `
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      `;
-      video.load();
-      video.play().catch(() => {});
-
-      wrapper.appendChild(video);
-      videoList.appendChild(wrapper);
-    });
-  };
-
-  const showList = (e) => {
-    e.stopPropagation();
-    if (stateRef.current.isListView) return;
-    stateRef.current.isListView = true;
-
-    buildListVideos();
-
-    // Show list wrap
-    listWrap.classList.add('is-visible');
-
-    // Fade in all list video items with GSAP
-    const listItems = videoList.querySelectorAll('.list-video-item');
-    if (window.gsap) {
-      window.gsap.to(listItems, {
-        opacity: 1,
-        duration: 1.8,
-        stagger: 0.1,
-        ease: 'power2.out',
-      });
-    } else {
-      listItems.forEach(item => { item.style.opacity = 1; });
-    }
-
-    onSwitchToList?.();
-  };
-
-  const showGrid = (e) => {
-    e.stopPropagation();
-    if (!stateRef.current.isListView) return;
-    stateRef.current.isListView = false;
-
-    if (window.gsap) {
-      const listItems = videoList.querySelectorAll('.list-video-item');
-      window.gsap.to(listItems, {
-        opacity: 0,
-        duration: 0.5,
-        ease: 'power2.in',
-        onComplete: () => {
-          listWrap.classList.remove('is-visible');
-          videoList.innerHTML = '';
-        },
-      });
-    } else {
-      listWrap.classList.remove('is-visible');
+    const buildListVideos = () => {
       videoList.innerHTML = '';
-    }
-  };
+      itemsRef.current.forEach((item) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'list-video-item';
+        wrapper.style.opacity = '0';
 
-  btnGrid.addEventListener('click', showGrid);
-  btnList.addEventListener('click', showList);
+        const video = document.createElement('video');
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.crossOrigin = 'anonymous';
+        video.src = item.videoUrl;
+        video.load();
+        video.play().catch(() => {});
 
-  return () => {
-    btnGrid.removeEventListener('click', showGrid);
-    btnList.removeEventListener('click', showList);
-  };
-}, [onSwitchToList]);
+        wrapper.appendChild(video);
+        videoList.appendChild(wrapper);
+      });
+    };
+
+    const showList = (e) => {
+      e.stopPropagation();
+      if (stateRef.current.isListView) return;
+      stateRef.current.isListView = true;
+
+      buildListVideos();
+      listWrap.classList.add('wg-visible');
+
+      const listItems = videoList.querySelectorAll('.list-video-item');
+      if (window.gsap) {
+        window.gsap.to(listItems, {
+          opacity: 1,
+          duration: 1.8,
+          stagger: 0.1,
+          ease: 'power2.out',
+        });
+      } else {
+        listItems.forEach(item => { item.style.opacity = '1'; });
+      }
+
+      onSwitchToList?.();
+    };
+
+    const showGrid = (e) => {
+      e.stopPropagation();
+      if (!stateRef.current.isListView) return;
+      stateRef.current.isListView = false;
+
+      const listItems = videoList.querySelectorAll('.list-video-item');
+      if (window.gsap) {
+        window.gsap.to(listItems, {
+          opacity: 0,
+          duration: 0.5,
+          ease: 'power2.in',
+          onComplete: () => {
+            listWrap.classList.remove('wg-visible');
+            videoList.innerHTML = '';
+          },
+        });
+      } else {
+        listWrap.classList.remove('wg-visible');
+        videoList.innerHTML = '';
+      }
+    };
+
+    btnGrid.addEventListener('click', showGrid);
+    btnList.addEventListener('click', showList);
+
+    return () => {
+      btnGrid.removeEventListener('click', showGrid);
+      btnList.removeEventListener('click', showList);
+    };
+  }, [onSwitchToList]);
 
   // Click to open
   useEffect(() => {
