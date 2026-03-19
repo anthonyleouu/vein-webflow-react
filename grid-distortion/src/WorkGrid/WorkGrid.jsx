@@ -149,6 +149,8 @@ export default function WorkGrid({ onSwitchToList }) {
     const wrapped = ((newIndex % total) + total) % total;
 
     const d = s.gridData;
+
+    // Blast distortion on exit
     if (d) {
       for (let i = 0; i < GRID * GRID; i++) {
         d[i * 4] = (Math.random() - 0.5) * 500;
@@ -165,10 +167,7 @@ export default function WorkGrid({ onSwitchToList }) {
         if (v && i !== wrapped) v.pause();
       });
 
-      loadVideoTexture(wrapped);
-      scrambleText(allItems[wrapped].name || '', setTitleText);
-      setCategoryText(allItems[wrapped].category || '');
-
+      // Blast distortion on entry BEFORE loading new video
       if (d) {
         for (let i = 0; i < GRID * GRID; i++) {
           d[i * 4] = (Math.random() - 0.5) * 500;
@@ -177,10 +176,17 @@ export default function WorkGrid({ onSwitchToList }) {
         if (s.dataTexture) s.dataTexture.needsUpdate = true;
       }
 
-      const nextIdx = ((wrapped + 1) % total + total) % total;
-      preloadVideo(nextIdx);
+      // Small delay so distortion frame renders before video switches
+      setTimeout(() => {
+        loadVideoTexture(wrapped);
+        scrambleText(allItems[wrapped].name || '', setTitleText);
+        setCategoryText(allItems[wrapped].category || '');
 
-      setTimeout(() => { s.transitioning = false; }, 400);
+        const nextIdx = ((wrapped + 1) % total + total) % total;
+        preloadVideo(nextIdx);
+
+        setTimeout(() => { s.transitioning = false; }, 400);
+      }, 50);
     }, 300);
   }, [loadVideoTexture, scrambleText, preloadVideo]);
 
@@ -290,6 +296,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const handleWheel = (e) => {
       e.preventDefault();
+      e.stopPropagation();
       if (s.transitioning) return;
       const direction = e.deltaY > 0 ? 1 : -1;
       if (!s.scrollHoldStart) {
@@ -315,9 +322,17 @@ export default function WorkGrid({ onSwitchToList }) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
     };
 
+    const wrapper = document.getElementById('work-grid-root');
+    if (wrapper) {
+      wrapper.addEventListener('wheel', handleWheel, { passive: false });
+    }
     window.addEventListener('wheel', handleWheel, { passive: false });
     window.addEventListener('keydown', handleKeyDown);
+
     return () => {
+      if (wrapper) {
+        wrapper.removeEventListener('wheel', handleWheel);
+      }
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeyDown);
       clearTimeout(wheelTimeout);
