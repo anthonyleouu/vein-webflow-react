@@ -76,6 +76,8 @@ export default function ArchiveCanvas() {
 
       overlay.style.display = 'none';
 
+      const cursorInner = document.getElementById('archive-cursor-inner');
+      if (cursorInner) cursorInner.style.opacity = '1';
       s.animating = true;
       s.targetX = s.originX;
       s.targetY = s.originY;
@@ -485,6 +487,8 @@ export default function ArchiveCanvas() {
         const item = s.items.find(i => i.slug === s.hoveredSlug);
         if (!item) return;
 
+        const cursorInner = document.getElementById('archive-cursor-inner');
+        if (cursorInner) cursorInner.style.opacity = '0';
         s._locked = true;
         s.activeCol = s.hoveredCol;
         s.activeRow = s.hoveredRow;
