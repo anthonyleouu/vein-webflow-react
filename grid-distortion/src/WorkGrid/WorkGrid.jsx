@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import './WorkGrid.css';
 import * as THREE from 'three';
-import Hls from 'hls.js';
 
 const vertexShader = `
   uniform float time;
@@ -27,32 +26,10 @@ const fragmentShader = `
 const SCROLL_DURATION_THRESHOLD = 300;
 const GRID = 15;
 
-// Attach hls.js to a video element for a given .m3u8 URL
-// Returns the Hls instance so it can be destroyed on cleanup
-function attachHls(video, url) {
-  if (!url) return null;
-
-  // If the browser supports HLS natively (Safari), just set src
-  if (!url.includes('.m3u8') || !Hls.isSupported()) {
-    video.src = url;
-    return null;
-  }
-
-  const hls = new Hls({
-    autoStartLoad: true,
-    startLevel: -1,
-    maxBufferLength: 10,
-  });
-  hls.loadSource(url);
-  hls.attachMedia(video);
-  return hls;
-}
-
 export default function WorkGrid({ onSwitchToList }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
   const videoRefs = useRef([]);
-  const hlsRefs = useRef([]); // track hls instances for cleanup
   const itemsRef = useRef([]);
 
   const stateRef = useRef({
@@ -124,62 +101,29 @@ export default function WorkGrid({ onSwitchToList }) {
     animate();
   }, []);
 
+  // Load video texture
   const loadVideoTexture = useCallback((index) => {
-  const s = stateRef.current;
-  if (!s.uniforms) return;
-  const allItems = itemsRef.current;
-  if (!allItems.length) return;
-  const item = allItems[index];
-  if (!item?.videoUrl) return;
-  const video = videoRefs.current[index];
-  if (!video) return;
+    const s = stateRef.current;
+    if (!s.uniforms) return;
+    const allItems = itemsRef.current;
+    if (!allItems.length) return;
+    const item = allItems[index];
+    if (!item?.videoUrl) return;
+    const video = videoRefs.current[index];
+    if (!video) return;
 
-  // Destroy existing hls instance for this slot if any
-  if (hlsRefs.current[index]) {
-    hlsRefs.current[index].destroy();
-    hlsRefs.current[index] = null;
-  }
-
-  // Create texture immediately — Three.js will pick up frames as they arrive
-  const texture = new THREE.VideoTexture(video);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  s.uniforms.uTexture.value = texture;
-
-  if (!item.videoUrl.includes('.m3u8') || !Hls.isSupported()) {
-    // Native HLS (Safari) or plain mp4
     video.src = item.videoUrl;
     video.load();
-    video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true });
-    return;
-  }
 
-  const hls = new Hls({
-    autoStartLoad: true,
-    startLevel: -1,
-    maxBufferLength: 10,
-  });
+    const texture = new THREE.VideoTexture(video);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    s.uniforms.uTexture.value = texture;
 
-  // Wait for manifest to parse before playing
-  hls.on(Hls.Events.MANIFEST_PARSED, () => {
-    video.play().catch(() => {});
-  });
-
-  // If hls errors, try native fallback
-  hls.on(Hls.Events.ERROR, (event, data) => {
-    if (data.fatal) {
-      hls.destroy();
-      hlsRefs.current[index] = null;
-      video.src = item.videoUrl;
-      video.load();
-      video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true });
-    }
-  });
-
-  hls.loadSource(item.videoUrl);
-  hls.attachMedia(video);
-  hlsRefs.current[index] = hls;
-}, []);
+    video.addEventListener('canplay', () => {
+      video.play().catch(() => {});
+    }, { once: true });
+  }, []);
 
   // Preload next video silently
   const preloadVideo = useCallback((index) => {
@@ -187,10 +131,9 @@ export default function WorkGrid({ onSwitchToList }) {
     const item = allItems[index];
     if (!item?.videoUrl) return;
     const video = videoRefs.current[index];
-    if (!video || hlsRefs.current[index]) return; // already loaded
-
-    const hls = attachHls(video, item.videoUrl);
-    if (hls) hlsRefs.current[index] = hls;
+    if (!video || video.src) return;
+    video.src = item.videoUrl;
+    video.load();
   }, []);
 
   // Navigate
@@ -301,7 +244,6 @@ export default function WorkGrid({ onSwitchToList }) {
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // Load first video now that uniforms exist
     loadVideoTexture(0);
 
     const animate = () => {
@@ -334,8 +276,6 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => {
       cancelAnimationFrame(s.animId);
       window.removeEventListener('resize', handleResize);
-      // Destroy all hls instances
-      hlsRefs.current.forEach(h => h?.destroy());
       renderer.dispose();
     };
   }, [loading, loadVideoTexture]);
@@ -417,7 +357,6 @@ export default function WorkGrid({ onSwitchToList }) {
       onMouseEnter={() => setCursorVisible(true)}
       onMouseLeave={() => setCursorVisible(false)}
     >
-      {/* Video elements — no src, hls.js attaches after mount */}
       {items.map((item, i) => (
         <div
           key={item.id}
