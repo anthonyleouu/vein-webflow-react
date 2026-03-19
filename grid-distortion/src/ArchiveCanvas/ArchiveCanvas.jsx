@@ -1,10 +1,143 @@
 import { useEffect, useRef } from 'react';
 import './ArchiveCanvas.css';
 import GradualBlur from '../GradualBlur/GradualBlur';
+import * as THREE from 'three';
 
 const GAP = 10;
 const MASONRY_OFFSETS = [0, 0.3, 0.15, 0.45, 0.22, 0.38, 0.08, 0.52];
 const PARALLAX = [0, 0.15, -0.1, 0.2, -0.15, 0.08, -0.2, 0.12];
+
+const startBlockDistortion = (container, imageSrc, width, height) => {
+  const vertexShader = `
+    uniform float time;
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const fragmentShader = `
+    uniform sampler2D uDataTexture;
+    uniform sampler2D uTexture;
+    varying vec2 vUv;
+    void main() {
+      vec2 uv = vUv;
+      vec4 offset = texture2D(uDataTexture, vUv);
+      gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
+    }
+  `;
+
+  const scene = new THREE.Scene();
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
+  renderer.setSize(width, height);
+  renderer.domElement.style.cssText = `
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+  `;
+  container.style.overflow = 'hidden';
+  container.appendChild(renderer.domElement);
+
+  const aspect = width / height;
+  const camera = new THREE.OrthographicCamera(
+    -aspect / 2, aspect / 2, 0.5, -0.5, -1000, 1000
+  );
+  camera.position.z = 2;
+
+  const grid = 15;
+  const data = new Float32Array(4 * grid * grid);
+  const dataTexture = new THREE.DataTexture(
+    data, grid, grid, THREE.RGBAFormat, THREE.FloatType
+  );
+  dataTexture.needsUpdate = true;
+
+  const uniforms = {
+    uTexture: { value: null },
+    uDataTexture: { value: dataTexture },
+  };
+
+  new THREE.TextureLoader().load(imageSrc, texture => {
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    uniforms.uTexture.value = texture;
+  });
+
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+
+  const geometry = new THREE.PlaneGeometry(aspect, 1, grid - 1, grid - 1);
+  const plane = new THREE.Mesh(geometry, material);
+  scene.add(plane);
+
+  const mouseState = { x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0 };
+
+  const onMouseMove = e => {
+    const rect = container.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = 1 - (e.clientY - rect.top) / rect.height;
+    mouseState.vX = x - mouseState.prevX;
+    mouseState.vY = y - mouseState.prevY;
+    Object.assign(mouseState, { x, y, prevX: x, prevY: y });
+  };
+
+  const onMouseLeave = () => {
+    Object.assign(mouseState, { x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0 });
+  };
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+
+  let animId;
+  const animate = () => {
+    animId = requestAnimationFrame(animate);
+    const d = dataTexture.image.data;
+    const mouse = 0.1;
+    const strength = 0.15;
+    const relaxation = 0.9;
+
+    for (let i = 0; i < grid * grid; i++) {
+      d[i * 4] *= relaxation;
+      d[i * 4 + 1] *= relaxation;
+    }
+
+    const gridMouseX = grid * mouseState.x;
+    const gridMouseY = grid * mouseState.y;
+    const maxDist = grid * mouse;
+
+    for (let i = 0; i < grid; i++) {
+      for (let j = 0; j < grid; j++) {
+        const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
+        if (distSq < maxDist * maxDist) {
+          const index = 4 * (i + grid * j);
+          const power = Math.min(maxDist / Math.sqrt(distSq), 10);
+          d[index] += strength * 100 * mouseState.vX * power;
+          d[index + 1] -= strength * 100 * mouseState.vY * power;
+        }
+      }
+    }
+
+    dataTexture.needsUpdate = true;
+    renderer.render(scene, camera);
+  };
+  animate();
+
+  container._destroyWebGL = () => {
+    cancelAnimationFrame(animId);
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseleave', onMouseLeave);
+    renderer.dispose();
+    renderer.forceContextLoss();
+    geometry.dispose();
+    material.dispose();
+    dataTexture.dispose();
+  };
+};
 
 export default function ArchiveCanvas() {
   const canvasRef = useRef(null);
@@ -59,9 +192,11 @@ export default function ArchiveCanvas() {
         panel.style.opacity = '0';
       }
 
-      // Remove active block DOM overlay
       const activeImg = document.getElementById('archive-active-block');
-      if (activeImg) activeImg.remove();
+      if (activeImg) {
+        if (activeImg._destroyWebGL) activeImg._destroyWebGL();
+        activeImg.remove();
+      }
 
       overlay.style.display = 'none';
 
@@ -90,16 +225,13 @@ export default function ArchiveCanvas() {
         });
       }
     };
-
     wireClose();
     setTimeout(wireClose, 1000);
 
     window._archiveClosePanel = closePanel;
 
     return () => {
-      if (document.body.contains(overlay)) {
-        document.body.removeChild(overlay);
-      }
+      if (document.body.contains(overlay)) document.body.removeChild(overlay);
       delete window._archiveClosePanel;
     };
   }, []);
@@ -170,7 +302,7 @@ export default function ArchiveCanvas() {
     const offscreen = document.createElement('canvas');
     const offCtx = offscreen.getContext('2d');
 
-    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1, scale = 1) => {
+    const drawWarpedImage = (img, dx, dy, dw, dh, warpAmount, opacity = 1) => {
       const scale2 = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
       const sw = img.naturalWidth * scale2;
       const sh = img.naturalHeight * scale2;
@@ -179,12 +311,6 @@ export default function ArchiveCanvas() {
 
       ctx.save();
       ctx.globalAlpha = opacity;
-
-      if (scale !== 1) {
-        ctx.translate(dx + dw / 2, dy + dh / 2);
-        ctx.scale(scale, scale);
-        ctx.translate(-(dx + dw / 2), -(dy + dh / 2));
-      }
 
       if (warpAmount < 0.01) {
         ctx.beginPath();
@@ -210,11 +336,7 @@ export default function ArchiveCanvas() {
       for (let i = 0; i < strips; i++) {
         const sy2 = i * stripH;
         const waveX = Math.sin((i / strips) * Math.PI * 4 + s.time * 2) * warpAmount * dw * 0.03;
-        ctx.drawImage(
-          offscreen,
-          0, sy2, dw, stripH + 1,
-          dx + waveX, dy + sy2, dw, stripH + 1
-        );
+        ctx.drawImage(offscreen, 0, sy2, dw, stripH + 1, dx + waveX, dy + sy2, dw, stripH + 1);
       }
       ctx.restore();
     };
@@ -233,7 +355,6 @@ export default function ArchiveCanvas() {
         s.y += s.vy;
       }
 
-      s.activeScale += (s.targetScale - s.activeScale) * 0.08;
       s.globalOpacity += (s.targetOpacity - s.globalOpacity) * 0.08;
       s.smoothVy += (s.vy - s.smoothVy) * 0.15;
 
@@ -266,7 +387,7 @@ export default function ArchiveCanvas() {
           const opacity = s._locked ? s.globalOpacity : 1;
 
           if (img) {
-            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity, 1);
+            drawWarpedImage(img, screenX, screenY, blockW, blockH, s.speed, opacity);
           } else {
             ctx.save();
             ctx.globalAlpha = opacity;
@@ -385,18 +506,22 @@ export default function ArchiveCanvas() {
         const targetBlockCenterX = window.innerWidth * 0.25;
         const targetBlockCenterY = window.innerHeight * 0.5;
 
-        const currentBlockCenterX = currentBlockScreenX + blockW / 2;
-        const currentBlockCenterY = currentBlockScreenY + blockH / 2;
-
-        s.targetX = s.x + (targetBlockCenterX - currentBlockCenterX);
-        s.targetY = s.y + (targetBlockCenterY - currentBlockCenterY);
+        s.targetX = s.x + (targetBlockCenterX - (currentBlockScreenX + blockW / 2));
+        s.targetY = s.y + (targetBlockCenterY - (currentBlockScreenY + blockH / 2));
         s.animating = true;
-        s.targetScale = 1.2;
         s.targetOpacity = 0.6;
 
-        // Create DOM overlay for active block — sits above everything
+        // Create DOM overlay for active block
         let activeImg = document.getElementById('archive-active-block');
-        if (activeImg) activeImg.remove();
+        if (activeImg) {
+          if (activeImg._destroyWebGL) activeImg._destroyWebGL();
+          activeImg.remove();
+        }
+
+        const scaledW = blockW * 1.2;
+        const scaledH = blockH * 1.2;
+        const targetLeft = targetBlockCenterX - scaledW / 2;
+        const targetTop = targetBlockCenterY - scaledH / 2;
 
         activeImg = document.createElement('div');
         activeImg.id = 'archive-active-block';
@@ -411,21 +536,12 @@ export default function ArchiveCanvas() {
           top: ${currentBlockScreenY}px;
           width: ${blockW}px;
           height: ${blockH}px;
-          transform: scale(1);
-          transform-origin: center;
           transition: left 0.7s cubic-bezier(0.16, 1, 0.3, 1),
                       top 0.7s cubic-bezier(0.16, 1, 0.3, 1),
                       width 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                      height 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                      transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+                      height 0.7s cubic-bezier(0.16, 1, 0.3, 1);
         `;
         document.body.appendChild(activeImg);
-
-        // Animate to target position
-        const scaledW = blockW * 1.2;
-        const scaledH = blockH * 1.2;
-        const targetLeft = targetBlockCenterX - scaledW / 2;
-        const targetTop = targetBlockCenterY - scaledH / 2;
 
         setTimeout(() => {
           activeImg.style.left = targetLeft + 'px';
@@ -433,6 +549,14 @@ export default function ArchiveCanvas() {
           activeImg.style.width = scaledW + 'px';
           activeImg.style.height = scaledH + 'px';
         }, 50);
+
+        // Add WebGL distortion after block is in position (desktop only)
+        if (window.innerWidth >= 1024) {
+          setTimeout(() => {
+            activeImg.style.backgroundImage = 'none';
+            startBlockDistortion(activeImg, item.image, scaledW, scaledH);
+          }, 800);
+        }
 
         // Populate panel
         const title = document.getElementById('archive-panel-title');
