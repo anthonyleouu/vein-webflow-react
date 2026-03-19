@@ -382,7 +382,8 @@ export default function ArchiveCanvas() {
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
           const isActive = s.activeCol === col && s.activeRow === row;
-          if (isActive) continue;
+          const domOverlayExists = !!document.getElementById('archive-active-block');
+          if (isActive && domOverlayExists) continue;
 
           const opacity = s._locked ? s.globalOpacity : 1;
 
@@ -508,6 +509,8 @@ export default function ArchiveCanvas() {
 
         s.targetX = s.x + (targetBlockCenterX - (currentBlockScreenX + blockW / 2));
         s.targetY = s.y + (targetBlockCenterY - (currentBlockScreenY + blockH / 2));
+        // Pre-mark active block so canvas skips it only after DOM overlay exists
+        s._pendingActive = true;
         s.animating = true;
         s.targetOpacity = 0.6;
 
