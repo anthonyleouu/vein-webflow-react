@@ -14,25 +14,22 @@ const fragmentShader = `
   uniform sampler2D uDataTexture;
   uniform sampler2D uTexture;
   uniform vec4 resolution;
-  uniform bool uHasTexture;
+  uniform float uAlpha;
   varying vec2 vUv;
   void main() {
-    if (!uHasTexture) {
-      gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-      return;
-    }
     vec2 uv = vUv;
     vec4 offset = texture2D(uDataTexture, vUv);
-    gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
+    vec4 color = texture2D(uTexture, uv - 0.02 * offset.rg);
+    gl_FragColor = vec4(color.rgb, color.a * uAlpha);
   }
 `;
 
 const GRID = 15;
-const MOUSE_STRENGTH = 0.15;
-const MOUSE_RADIUS = 0.1;
-const RELAXATION = 0.9;
-const BLAST_STRENGTH = 150;
-const SCROLL_COOLDOWN = 800;
+const MOUSE_STRENGTH = 0.06;
+const MOUSE_RADIUS = 0.08;
+const RELAXATION = 0.92;
+const BLAST_STRENGTH = 60;
+const SCROLL_COOLDOWN = 900;
 
 export default function WorkGrid({ onSwitchToList }) {
   const itemsRef = useRef([]);
@@ -56,6 +53,7 @@ export default function WorkGrid({ onSwitchToList }) {
     gridData: null,
     lastScrollTime: 0,
     isListView: false,
+    canvasAlpha: 0,
   });
 
   const [items, setItems] = useState([]);
@@ -65,11 +63,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!element || !window.gsap) return;
     window.gsap.to(element, {
       duration: 1.2,
-      scrambleText: {
-        text: text,
-        chars: 'upperCase',
-        speed: 0.85,
-      },
+      scrambleText: { text, chars: 'upperCase', speed: 0.85 },
     });
   }, []);
 
@@ -93,14 +87,13 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements inside video-stack
+  // Build video elements
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
     if (!stack) return;
 
     stack.innerHTML = '';
-
     items.forEach((item, i) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'grid-video-item';
@@ -111,6 +104,7 @@ export default function WorkGrid({ onSwitchToList }) {
         height: 100%;
         opacity: ${i === 0 ? 1 : 0};
         z-index: ${i === 0 ? 1 : 0};
+        transition: opacity 0.3s ease;
       `;
 
       const video = document.createElement('video');
@@ -135,10 +129,9 @@ export default function WorkGrid({ onSwitchToList }) {
     const counterEl = document.querySelector('.work-counter');
     if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
     if (counterEl) counterEl.textContent = '[PROJECT 01]';
-
   }, [loading, items]);
 
-  // Load video texture — matches GridDistortion.jsx approach exactly
+  // Load video — fade in canvas only after video ready
   const loadVideoTexture = useCallback((index) => {
     const s = stateRef.current;
     if (!s.uniforms) return;
@@ -149,23 +142,19 @@ export default function WorkGrid({ onSwitchToList }) {
     const video = videoRefs.current[index];
     if (!video) return;
 
-    // Reset has texture flag
-    s.uniforms.uHasTexture.value = false;
-
     video.crossOrigin = 'anonymous';
     video.src = item.videoUrl;
 
     video.addEventListener('loadedmetadata', () => {
-      const videoTexture = new THREE.VideoTexture(video);
-      videoTexture.minFilter = THREE.LinearFilter;
-      videoTexture.magFilter = THREE.LinearFilter;
-      videoTexture.wrapS = THREE.ClampToEdgeWrapping;
-      videoTexture.wrapT = THREE.ClampToEdgeWrapping;
+      const texture = new THREE.VideoTexture(video);
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
 
-      s.uniforms.uTexture.value = videoTexture;
-      s.uniforms.uHasTexture.value = true;
+      s.uniforms.uTexture.value = texture;
 
-      // Recalculate scale with video aspect ratio — exactly like GridDistortion.jsx
+      // Proper cover scale using video aspect ratio
       const W = window.innerWidth;
       const H = window.innerHeight;
       const containerAspect = W / H;
@@ -179,8 +168,17 @@ export default function WorkGrid({ onSwitchToList }) {
         scaleX = videoAspect;
         scaleY = 1;
       }
-
       if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
+
+      // Fade canvas in smoothly — no green flash
+      s.uniforms.uAlpha.value = 0;
+      const fadeIn = () => {
+        if (s.uniforms.uAlpha.value < 1) {
+          s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.05, 1);
+          requestAnimationFrame(fadeIn);
+        }
+      };
+      fadeIn();
 
       video.play().catch(() => {});
     }, { once: true });
@@ -199,7 +197,8 @@ export default function WorkGrid({ onSwitchToList }) {
     video.load();
   }, []);
 
-  const blast = useCallback(() => {
+  // Subtle blast — exit only
+  const blastExit = useCallback(() => {
     const s = stateRef.current;
     const d = s.gridData;
     if (!d) return;
@@ -220,23 +219,22 @@ export default function WorkGrid({ onSwitchToList }) {
     const wrapped = ((newIndex % total) + total) % total;
     const stack = document.querySelector('.video-stack');
 
-    blast();
+    // Exit distortion only
+    blastExit();
 
     setTimeout(() => {
-      if (stack) {
-        const current = stack.children[s.currentIndex];
-        if (current) { current.style.opacity = 0; current.style.zIndex = 0; }
+      // Hide current
+      if (stack?.children[s.currentIndex]) {
+        stack.children[s.currentIndex].style.opacity = 0;
+        stack.children[s.currentIndex].style.zIndex = 0;
       }
+      videoRefs.current[s.currentIndex]?.pause();
 
-      const currentVideo = videoRefs.current[s.currentIndex];
-      if (currentVideo) currentVideo.pause();
-
-      blast();
-
+      // Show next — no entry blast
       setTimeout(() => {
-        if (stack) {
-          const next = stack.children[wrapped];
-          if (next) { next.style.opacity = 1; next.style.zIndex = 1; }
+        if (stack?.children[wrapped]) {
+          stack.children[wrapped].style.opacity = 1;
+          stack.children[wrapped].style.zIndex = 1;
         }
 
         s.currentIndex = wrapped;
@@ -249,9 +247,9 @@ export default function WorkGrid({ onSwitchToList }) {
         setTimeout(() => { s.transitioning = false; }, 400);
       }, 50);
     }, 300);
-  }, [blast, loadVideoTexture, updateUI, preloadVideo]);
+  }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
 
-  // Setup Three.js — mirrors GridDistortion.jsx exactly
+  // Setup Three.js
   useEffect(() => {
     if (loading || !items.length) return;
     const s = stateRef.current;
@@ -272,7 +270,6 @@ export default function WorkGrid({ onSwitchToList }) {
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
     camera.position.z = 2;
 
-    // Zero initialized — no green tint
     const gridData = new Float32Array(4 * GRID * GRID);
     const dataTexture = new THREE.DataTexture(
       gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
@@ -282,9 +279,9 @@ export default function WorkGrid({ onSwitchToList }) {
     const uniforms = {
       time: { value: 0 },
       resolution: { value: new THREE.Vector4() },
-      uTexture: { value: null },
-      uHasTexture: { value: false },
+      uTexture: { value: new THREE.Texture() },
       uDataTexture: { value: dataTexture },
+      uAlpha: { value: 0 },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -307,19 +304,16 @@ export default function WorkGrid({ onSwitchToList }) {
       const W = window.innerWidth;
       const H = window.innerHeight;
       renderer.setSize(W, H);
-      const containerAspect = W / H;
-
+      const aspect = W / H;
+      plane.scale.set(aspect, 1, 1);
       const frustumH = 1;
-      const frustumW = frustumH * containerAspect;
+      const frustumW = frustumH * aspect;
       camera.left = -frustumW / 2;
       camera.right = frustumW / 2;
       camera.top = frustumH / 2;
       camera.bottom = -frustumH / 2;
       camera.updateProjectionMatrix();
       uniforms.resolution.value.set(W, H, 1, 1);
-
-      // Scale will be set properly in loadVideoTexture once metadata loads
-      plane.scale.set(containerAspect, 1, 1);
     };
     handleResize();
     window.addEventListener('resize', handleResize);
@@ -401,7 +395,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [items, navigateTo]);
 
-  // Mouse tracking
+  // Mouse
   useEffect(() => {
     const s = stateRef.current;
     const handleMouseMove = (e) => {
@@ -416,7 +410,7 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Grid/List toggle
+  // Grid/List toggle — no !important, uses className toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -428,23 +422,15 @@ export default function WorkGrid({ onSwitchToList }) {
     const showGrid = (e) => {
       e.stopPropagation();
       stateRef.current.isListView = false;
-      if (gridWrap) gridWrap.style.display = '';
-      if (listWrap) listWrap.style.display = 'none';
+      if (gridWrap) gridWrap.style.setProperty('display', 'block');
+      if (listWrap) listWrap.style.setProperty('display', 'none');
     };
 
     const showList = (e) => {
       e.stopPropagation();
       stateRef.current.isListView = true;
-      if (gridWrap) gridWrap.style.display = 'none';
-      if (listWrap) {
-        listWrap.style.display = '';
-        listWrap.style.position = 'fixed';
-        listWrap.style.inset = '0';
-        listWrap.style.width = '100vw';
-        listWrap.style.height = '100vh';
-        listWrap.style.zIndex = '50';
-        listWrap.style.background = '#000';
-      }
+      if (gridWrap) gridWrap.style.setProperty('display', 'none');
+      if (listWrap) listWrap.style.setProperty('display', 'block');
       onSwitchToList?.();
     };
 
@@ -457,7 +443,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [onSwitchToList]);
 
-  // Click to open project
+  // Click to open
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
