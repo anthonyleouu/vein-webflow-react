@@ -25,10 +25,10 @@ const fragmentShader = `
 `;
 
 const GRID = 15;
-const MOUSE_STRENGTH = 0.06;
+const MOUSE_STRENGTH = 0.03;
 const MOUSE_RADIUS = 0.08;
 const RELAXATION = 0.92;
-const BLAST_STRENGTH = 60;
+const BLAST_STRENGTH = 20;
 const SCROLL_COOLDOWN = 900;
 
 function injectStyle(id, css) {
@@ -64,6 +64,7 @@ export default function WorkGrid({ onSwitchToList }) {
     gridData: null,
     lastScrollTime: 0,
     isListView: false,
+    listIndex: 0,
   });
 
   const [items, setItems] = useState([]);
@@ -76,11 +77,13 @@ export default function WorkGrid({ onSwitchToList }) {
         inset: 0;
         width: 100%;
         height: 100%;
+        overflow: hidden;
       }
       .grid-video-item {
         position: absolute;
         overflow: hidden;
-        will-change: transform, width, height, opacity;
+        will-change: transform, opacity;
+        transform-origin: center center;
       }
       .grid-video-item video {
         position: absolute;
@@ -124,7 +127,7 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements — all fullscreen by default
+  // Build video elements
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -204,7 +207,7 @@ export default function WorkGrid({ onSwitchToList }) {
       s.uniforms.uAlpha.value = 0;
       const fadeIn = () => {
         if (s.uniforms.uAlpha.value < 1) {
-          s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.05, 1);
+          s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.03, 1);
           requestAnimationFrame(fadeIn);
         }
       };
@@ -246,7 +249,6 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const total = allItems.length;
     const wrapped = ((newIndex % total) + total) % total;
-    const stack = document.querySelector('.video-stack');
 
     blastExit();
 
@@ -270,64 +272,86 @@ export default function WorkGrid({ onSwitchToList }) {
         const nextIdx = ((wrapped + 1) % total + total) % total;
         preloadVideo(nextIdx);
 
-        setTimeout(() => { s.transitioning = false; }, 400);
-      }, 50);
-    }, 300);
+        setTimeout(() => { s.transitioning = false; }, 600);
+      }, 100);
+    }, 400);
   }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
 
-  // Switch to LIST — animate videos into horizontal row
-  const switchToList = useCallback(() => {
-    const s = stateRef.current;
-    if (s.isListView || !window.gsap) return;
-    s.isListView = true;
-
+  // List position calculator — wraps around so active is always centered
+  const getListPositions = useCallback((activeIdx) => {
     const W = window.innerWidth;
     const H = window.innerHeight;
     const itemW = W * 0.35;
     const itemH = H * 0.45;
-    const total = wrapperRefs.current.length;
-    const activeIdx = s.currentIndex;
     const centerX = (W - itemW) / 2;
     const centerY = (H - itemH) / 2;
+    const total = wrapperRefs.current.length;
+    const positions = [];
 
-    // Load all videos for list view
+    for (let i = 0; i < total; i++) {
+      // Calculate offset wrapping around
+      let offset = i - activeIdx;
+      // Wrap: if offset > half total, subtract total
+      if (offset > total / 2) offset -= total;
+      if (offset < -total / 2) offset += total;
+
+      positions.push({
+        x: centerX + offset * itemW,
+        y: centerY,
+        w: itemW,
+        h: itemH,
+      });
+    }
+    return positions;
+  }, []);
+
+  // Switch to LIST
+  const switchToList = useCallback(() => {
+    const s = stateRef.current;
+    if (s.isListView || !window.gsap) return;
+    s.isListView = true;
+    s.listIndex = s.currentIndex;
+
+    const positions = getListPositions(s.currentIndex);
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+
+    // Load all videos
     itemsRef.current.forEach((item, i) => {
       const video = videoRefs.current[i];
       if (video && !video.src) {
         video.crossOrigin = 'anonymous';
         video.src = item.videoUrl;
         video.load();
-        video.play().catch(() => {});
-      } else if (video) {
-        video.play().catch(() => {});
       }
+      if (video) video.play().catch(() => {});
     });
 
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
-
-      const offset = i - activeIdx;
-      const targetX = centerX + offset * itemW;
-      const targetY = centerY;
+      const pos = positions[i];
+      const scaleX = pos.w / W;
+      const scaleY = pos.h / H;
+      const translateX = pos.x - (W * (1 - scaleX)) / 2;
+      const translateY = pos.y - (H * (1 - scaleY)) / 2;
 
       window.gsap.to(wrapper, {
-        position: 'absolute',
-        left: targetX,
-        top: targetY,
-        width: itemW,
-        height: itemH,
+        x: translateX,
+        y: translateY,
+        scaleX,
+        scaleY,
         opacity: 1,
-        zIndex: i === activeIdx ? 2 : 1,
+        zIndex: i === s.currentIndex ? 2 : 1,
         duration: 1.8,
         ease: 'power3.inOut',
       });
     });
 
-    // Hide canvas in list view
+    // Hide canvas
     const canvas = document.querySelector('.work-canvas');
     if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
 
-  }, []);
+  }, [getListPositions]);
 
   // Switch back to GRID
   const switchToGrid = useCallback(() => {
@@ -340,28 +364,60 @@ export default function WorkGrid({ onSwitchToList }) {
       const isActive = i === s.currentIndex;
 
       window.gsap.to(wrapper, {
-        left: 0,
-        top: 0,
-        width: '100%',
-        height: '100%',
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
         opacity: isActive ? 1 : 0,
         zIndex: isActive ? 1 : 0,
         duration: 1.2,
         ease: 'power3.inOut',
         onComplete: () => {
-          if (!isActive) {
-            const video = videoRefs.current[i];
-            if (video) video.pause();
-          }
+          if (!isActive) videoRefs.current[i]?.pause();
         },
       });
     });
 
-    // Show canvas again
+    // Show canvas
     const canvas = document.querySelector('.work-canvas');
     if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
 
   }, []);
+
+  // List navigation — scroll moves between projects
+  const navigateList = useCallback((direction) => {
+    const s = stateRef.current;
+    if (!s.isListView || !window.gsap) return;
+    const total = itemsRef.current.length;
+    s.listIndex = ((s.listIndex + direction) % total + total) % total;
+    s.currentIndex = s.listIndex;
+
+    const positions = getListPositions(s.listIndex);
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+
+    // Update title
+    updateUI(itemsRef.current[s.listIndex], s.listIndex);
+
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
+      const pos = positions[i];
+      const scaleX = pos.w / W;
+      const scaleY = pos.h / H;
+      const translateX = pos.x - (W * (1 - scaleX)) / 2;
+      const translateY = pos.y - (H * (1 - scaleY)) / 2;
+
+      window.gsap.to(wrapper, {
+        x: translateX,
+        y: translateY,
+        scaleX,
+        scaleY,
+        zIndex: i === s.listIndex ? 2 : 1,
+        duration: 0.6,
+        ease: 'power2.out',
+      });
+    });
+  }, [getListPositions, updateUI]);
 
   // Setup Three.js
   useEffect(() => {
@@ -474,7 +530,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [loading, items, loadVideoTexture, preloadVideo]);
 
-  // Scroll
+  // Scroll — grid navigation + list navigation
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -482,19 +538,29 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (s.isListView) return;
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
-      if (s.transitioning) return;
-      if (Math.abs(e.deltaY) < 30) return;
       s.lastScrollTime = now;
-      navigateTo(s.currentIndex + (e.deltaY > 0 ? 1 : -1));
+
+      const direction = e.deltaY > 0 ? 1 : -1;
+
+      if (s.isListView) {
+        navigateList(direction);
+      } else {
+        if (s.transitioning) return;
+        if (Math.abs(e.deltaY) < 30) return;
+        navigateTo(s.currentIndex + direction);
+      }
     };
 
     const handleKeyDown = (e) => {
-      if (s.isListView) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
+      const direction =
+        e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 :
+        e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
+      if (!direction) return;
+
+      if (s.isListView) navigateList(direction);
+      else navigateTo(s.currentIndex + direction);
     };
 
     const wrapper = document.getElementById('work-grid-root');
@@ -507,7 +573,7 @@ export default function WorkGrid({ onSwitchToList }) {
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [items, navigateTo]);
+  }, [items, navigateTo, navigateList]);
 
   // Mouse
   useEffect(() => {
@@ -530,16 +596,8 @@ export default function WorkGrid({ onSwitchToList }) {
     const btnList = document.querySelector('.btn-list');
     if (!btnGrid || !btnList) return;
 
-    const handleGrid = (e) => {
-      e.stopPropagation();
-      switchToGrid();
-    };
-
-    const handleList = (e) => {
-      e.stopPropagation();
-      switchToList();
-      onSwitchToList?.();
-    };
+    const handleGrid = (e) => { e.stopPropagation(); switchToGrid(); };
+    const handleList = (e) => { e.stopPropagation(); switchToList(); onSwitchToList?.(); };
 
     btnGrid.addEventListener('click', handleGrid);
     btnList.addEventListener('click', handleList);
