@@ -433,25 +433,25 @@ export default function ArchiveCanvas() {
 
         // Check if animation is complete
         const dx = Math.abs(s.activeBlockX - s.activeBlockTargetX);
-        const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
-        if (dx < 0.5 && dy < 0.5 && window.innerWidth >= 1024) {
-          s.activeBlockDone = true;
+const dy = Math.abs(s.activeBlockY - s.activeBlockTargetY);
+const totalDist = Math.hypot(s.activeBlockTargetX - s.activeBlockX + dx, s.activeBlockTargetY - s.activeBlockY + dy);
+if (dx < 8 && dy < 8 && window.innerWidth >= 1024) {
+  s.activeBlockDone = true;
 
-          // Switch to WebGL DOM overlay once animation is complete
-          const webglContainer = document.createElement('div');
-          webglContainer.id = 'archive-active-block';
-          webglContainer.style.cssText = `
-            position: fixed;
-            z-index: 1003;
-            pointer-events: none;
-            left: ${s.activeBlockTargetX}px;
-            top: ${s.activeBlockTargetY}px;
-            width: ${s.activeBlockTargetW}px;
-            height: ${s.activeBlockTargetH}px;
-          `;
-          document.body.appendChild(webglContainer);
-          startBlockDistortion(webglContainer, s.activeBlockImg.src, s.activeBlockTargetW, s.activeBlockTargetH);
-        }
+  const webglContainer = document.createElement('div');
+  webglContainer.id = 'archive-active-block';
+  webglContainer.style.cssText = `
+    position: fixed;
+    z-index: 1003;
+    pointer-events: none;
+    left: ${s.activeBlockTargetX}px;
+    top: ${s.activeBlockTargetY}px;
+    width: ${s.activeBlockTargetW}px;
+    height: ${s.activeBlockTargetH}px;
+  `;
+  document.body.appendChild(webglContainer);
+  startBlockDistortion(webglContainer, s.activeBlockImg.src, s.activeBlockTargetW, s.activeBlockTargetH);
+}
       }
 
       s.animId = requestAnimationFrame(drawFrame);
