@@ -14,8 +14,13 @@ const fragmentShader = `
   uniform sampler2D uDataTexture;
   uniform sampler2D uTexture;
   uniform vec4 resolution;
+  uniform bool uHasTexture;
   varying vec2 vUv;
   void main() {
+    if (!uHasTexture) {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+      return;
+    }
     vec2 uv = vUv;
     vec4 offset = texture2D(uDataTexture, vUv);
     gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
@@ -56,7 +61,6 @@ export default function WorkGrid({ onSwitchToList }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // GSAP scramble using site's existing GSAP
   const scramble = useCallback((element, text) => {
     if (!element || !window.gsap) return;
     window.gsap.to(element, {
@@ -69,7 +73,6 @@ export default function WorkGrid({ onSwitchToList }) {
     });
   }, []);
 
-  // Update UI text
   const updateUI = useCallback((item, index) => {
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
@@ -78,7 +81,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (counterEl) scramble(counterEl, `[PROJECT ${num}]`);
   }, [scramble]);
 
-  // Fetch items
   useEffect(() => {
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
@@ -91,7 +93,7 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements
+  // Build video elements inside video-stack
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -129,7 +131,6 @@ export default function WorkGrid({ onSwitchToList }) {
       videoRefs.current[i] = video;
     });
 
-    // Set initial text without scramble
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
     if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
@@ -137,7 +138,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
   }, [loading, items]);
 
-  // Load video texture
+  // Load video texture — matches GridDistortion.jsx approach exactly
   const loadVideoTexture = useCallback((index) => {
     const s = stateRef.current;
     if (!s.uniforms) return;
@@ -148,21 +149,45 @@ export default function WorkGrid({ onSwitchToList }) {
     const video = videoRefs.current[index];
     if (!video) return;
 
+    // Reset has texture flag
+    s.uniforms.uHasTexture.value = false;
+
     video.crossOrigin = 'anonymous';
     video.src = item.videoUrl;
-    video.load();
 
-    const texture = new THREE.VideoTexture(video);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    s.uniforms.uTexture.value = texture;
+    video.addEventListener('loadedmetadata', () => {
+      const videoTexture = new THREE.VideoTexture(video);
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      videoTexture.wrapS = THREE.ClampToEdgeWrapping;
+      videoTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-    video.addEventListener('canplay', () => {
+      s.uniforms.uTexture.value = videoTexture;
+      s.uniforms.uHasTexture.value = true;
+
+      // Recalculate scale with video aspect ratio — exactly like GridDistortion.jsx
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const containerAspect = W / H;
+      const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
+
+      let scaleX, scaleY;
+      if (containerAspect > videoAspect) {
+        scaleX = containerAspect;
+        scaleY = containerAspect / videoAspect;
+      } else {
+        scaleX = videoAspect;
+        scaleY = 1;
+      }
+
+      if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
+
       video.play().catch(() => {});
     }, { once: true });
+
+    video.load();
   }, []);
 
-  // Preload video
   const preloadVideo = useCallback((index) => {
     const allItems = itemsRef.current;
     const item = allItems[index];
@@ -174,7 +199,6 @@ export default function WorkGrid({ onSwitchToList }) {
     video.load();
   }, []);
 
-  // Blast distortion
   const blast = useCallback(() => {
     const s = stateRef.current;
     const d = s.gridData;
@@ -186,7 +210,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (s.dataTexture) s.dataTexture.needsUpdate = true;
   }, []);
 
-  // Navigate
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -228,7 +251,7 @@ export default function WorkGrid({ onSwitchToList }) {
     }, 300);
   }, [blast, loadVideoTexture, updateUI, preloadVideo]);
 
-  // Setup Three.js — copied from GridDistortion.jsx
+  // Setup Three.js — mirrors GridDistortion.jsx exactly
   useEffect(() => {
     if (loading || !items.length) return;
     const s = stateRef.current;
@@ -249,7 +272,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
     camera.position.z = 2;
 
-    // Initialize grid data to zero — no green tint on load
+    // Zero initialized — no green tint
     const gridData = new Float32Array(4 * GRID * GRID);
     const dataTexture = new THREE.DataTexture(
       gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
@@ -259,7 +282,8 @@ export default function WorkGrid({ onSwitchToList }) {
     const uniforms = {
       time: { value: 0 },
       resolution: { value: new THREE.Vector4() },
-      uTexture: { value: new THREE.Texture() },
+      uTexture: { value: null },
+      uHasTexture: { value: false },
       uDataTexture: { value: dataTexture },
     };
 
@@ -283,9 +307,7 @@ export default function WorkGrid({ onSwitchToList }) {
       const W = window.innerWidth;
       const H = window.innerHeight;
       renderer.setSize(W, H);
-
       const containerAspect = W / H;
-      plane.scale.set(containerAspect, 1, 1);
 
       const frustumH = 1;
       const frustumW = frustumH * containerAspect;
@@ -295,11 +317,13 @@ export default function WorkGrid({ onSwitchToList }) {
       camera.bottom = -frustumH / 2;
       camera.updateProjectionMatrix();
       uniforms.resolution.value.set(W, H, 1, 1);
+
+      // Scale will be set properly in loadVideoTexture once metadata loads
+      plane.scale.set(containerAspect, 1, 1);
     };
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // Load first video after uniforms exist
     loadVideoTexture(0);
     if (items.length > 1) preloadVideo(1);
 
@@ -350,7 +374,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (s.isListView) return; // ignore scroll in list view
+      if (s.isListView) return;
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
       if (s.transitioning) return;
@@ -392,7 +416,7 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Grid/List toggle — fix: properly show/hide without destroying nav
+  // Grid/List toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -419,6 +443,7 @@ export default function WorkGrid({ onSwitchToList }) {
         listWrap.style.width = '100vw';
         listWrap.style.height = '100vh';
         listWrap.style.zIndex = '50';
+        listWrap.style.background = '#000';
       }
       onSwitchToList?.();
     };
