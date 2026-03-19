@@ -294,17 +294,21 @@ export default function ArchiveCanvas() {
       const stripH = dh / strips;
 
       for (let i = 0; i < strips; i++) {
-        const sy2 = i * stripH;
-        const gridRow = Math.floor((i / strips) * GRID);
-        const gridCol = Math.floor(GRID / 2);
-        const index = 4 * (gridCol + GRID * gridRow);
-        const waveX = d[index] * dw * 0.02;
-        ctx.drawImage(
-          offscreen,
-          0, sy2, dw, stripH + 1,
-          dx + waveX, dy + sy2, dw, stripH + 1
-        );
-      }
+  const sy2 = i * stripH;
+  // Sample the full grid row and average the X offset across all columns
+  const gridRow = Math.floor((i / strips) * GRID);
+  let avgWaveX = 0;
+  for (let gc = 0; gc < GRID; gc++) {
+    const index = 4 * (gc + GRID * gridRow);
+    avgWaveX += d[index];
+  }
+  avgWaveX = (avgWaveX / GRID) * dw * 0.02;
+  ctx.drawImage(
+    offscreen,
+    0, sy2, dw, stripH + 1,
+    dx + avgWaveX, dy + sy2, dw, stripH + 1
+  );
+}
 
       ctx.restore();
 
