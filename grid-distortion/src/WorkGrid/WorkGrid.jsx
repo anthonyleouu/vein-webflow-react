@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import './WorkGrid.css';
 import * as THREE from 'three';
 
 const vertexShader = `
@@ -23,20 +22,20 @@ const fragmentShader = `
   }
 `;
 
-const SCROLL_DURATION_THRESHOLD = 300;
 const GRID = 15;
+const MOUSE_STRENGTH = 0.08;
+const MOUSE_RADIUS = 0.1;
+const RELAXATION = 0.9;
+const BLAST_STRENGTH = 200; // tuned down from 500
+const SCROLL_COOLDOWN = 800;
 
 export default function WorkGrid({ onSwitchToList }) {
-  const wrapperRef = useRef(null);
-  const canvasRef = useRef(null);
-  const videoRefs = useRef([]);
   const itemsRef = useRef([]);
-
+  const videoRefs = useRef([]);
+  const hlsRefs = useRef([]);
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
-    scrollHoldStart: null,
-    scrollDirection: null,
     mouseX: 0,
     mouseY: 0,
     prevMouseX: 0,
@@ -51,17 +50,36 @@ export default function WorkGrid({ onSwitchToList }) {
     dataTexture: null,
     animId: null,
     gridData: null,
+    lastScrollTime: 0,
   });
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [titleText, setTitleText] = useState('');
-  const [categoryText, setCategoryText] = useState('');
-  const [cursorPos, setCursorPos] = useState({ x: -300, y: -300 });
-  const [cursorVisible, setCursorVisible] = useState(false);
 
-  useEffect(() => { itemsRef.current = items; }, [items]);
+  // Get GSAP scramble from window (loaded in Webflow)
+  const scramble = useCallback((element, text) => {
+    if (!element || !window.gsap || !window.ScrambleTextPlugin) return;
+    window.gsap.to(element, {
+      duration: 1.2,
+      scrambleText: {
+        text: text,
+        chars: 'upperCase',
+        speed: 0.85,
+      },
+    });
+  }, []);
+
+  // Update counter and title with scramble
+  const updateUI = useCallback((item, index, total) => {
+    const titleEl = document.querySelector('.title-name');
+    const counterEl = document.querySelector('.work-counter');
+
+    if (titleEl) scramble(titleEl, item.name.toUpperCase());
+    if (counterEl) {
+      const num = String(index + 1).padStart(2, '0');
+      scramble(counterEl, `[PROJECT ${num}]`);
+    }
+  }, [scramble]);
 
   // Fetch work items
   useEffect(() => {
@@ -71,35 +89,64 @@ export default function WorkGrid({ onSwitchToList }) {
         const fetched = data.items || [];
         setItems(fetched);
         itemsRef.current = fetched;
-        if (fetched.length) {
-          setTitleText(fetched[0].name || '');
-          setCategoryText(fetched[0].category || '');
-        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
-  // Scramble text
-  const scrambleText = useCallback((target, setText) => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let frame = 0;
-    const totalFrames = 20;
-    const original = target.toUpperCase();
-    const animate = () => {
-      if (frame >= totalFrames) { setText(original); return; }
-      const progress = frame / totalFrames;
-      const result = original.split('').map((char, i) => {
-        if (char === ' ') return ' ';
-        if (i < original.length * progress) return char;
-        return chars[Math.floor(Math.random() * chars.length)];
-      }).join('');
-      setText(result);
-      frame++;
-      requestAnimationFrame(animate);
-    };
-    animate();
-  }, []);
+  // Build video elements inside video-stack
+  useEffect(() => {
+    if (loading || !items.length) return;
+
+    const stack = document.querySelector('.video-stack');
+    if (!stack) return;
+
+    // Clear placeholder
+    stack.innerHTML = '';
+
+    items.forEach((item, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'grid-video-item';
+      wrapper.style.cssText = `
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: ${i === 0 ? 1 : 0};
+        z-index: ${i === 0 ? 1 : 0};
+        transition: opacity 0.1s;
+      `;
+
+      const video = document.createElement('video');
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.style.cssText = `
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      `;
+
+      wrapper.appendChild(video);
+      stack.appendChild(wrapper);
+      videoRefs.current[i] = video;
+    });
+
+    // Set initial UI
+    const titleEl = document.querySelector('.title-name');
+    const counterEl = document.querySelector('.work-counter');
+    if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
+    if (counterEl) counterEl.textContent = '[PROJECT 01]';
+
+    // Load first video
+    loadVideoTexture(0);
+    // Preload second
+    if (items.length > 1) preloadVideo(1);
+
+  }, [loading, items]);
 
   // Load video texture
   const loadVideoTexture = useCallback((index) => {
@@ -126,7 +173,7 @@ export default function WorkGrid({ onSwitchToList }) {
     }, { once: true });
   }, []);
 
-  // Preload next video silently
+  // Preload video silently
   const preloadVideo = useCallback((index) => {
     const allItems = itemsRef.current;
     const item = allItems[index];
@@ -138,7 +185,19 @@ export default function WorkGrid({ onSwitchToList }) {
     video.load();
   }, []);
 
-  // Navigate
+  // Blast grid distortion
+  const blast = useCallback(() => {
+    const s = stateRef.current;
+    const d = s.gridData;
+    if (!d) return;
+    for (let i = 0; i < GRID * GRID; i++) {
+      d[i * 4] = (Math.random() - 0.5) * BLAST_STRENGTH;
+      d[i * 4 + 1] = (Math.random() - 0.5) * BLAST_STRENGTH;
+    }
+    if (s.dataTexture) s.dataTexture.needsUpdate = true;
+  }, []);
+
+  // Navigate to index
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -147,59 +206,57 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const total = allItems.length;
     const wrapped = ((newIndex % total) + total) % total;
+    const stack = document.querySelector('.video-stack');
 
-    const d = s.gridData;
-
-    // Blast distortion on exit
-    if (d) {
-      for (let i = 0; i < GRID * GRID; i++) {
-        d[i * 4] = (Math.random() - 0.5) * 500;
-        d[i * 4 + 1] = (Math.random() - 0.5) * 500;
-      }
-      if (s.dataTexture) s.dataTexture.needsUpdate = true;
-    }
+    // Blast on exit
+    blast();
 
     setTimeout(() => {
-      s.currentIndex = wrapped;
-      setCurrentIndex(wrapped);
-
-      videoRefs.current.forEach((v, i) => {
-        if (v && i !== wrapped) v.pause();
-      });
-
-      // Blast distortion on entry BEFORE loading new video
-      if (d) {
-        for (let i = 0; i < GRID * GRID; i++) {
-          d[i * 4] = (Math.random() - 0.5) * 500;
-          d[i * 4 + 1] = (Math.random() - 0.5) * 500;
-        }
-        if (s.dataTexture) s.dataTexture.needsUpdate = true;
+      // Hide current video
+      if (stack) {
+        const current = stack.children[s.currentIndex];
+        if (current) { current.style.opacity = 0; current.style.zIndex = 0; }
       }
 
-      // Small delay so distortion frame renders before video switches
-      setTimeout(() => {
-        loadVideoTexture(wrapped);
-        scrambleText(allItems[wrapped].name || '', setTitleText);
-        setCategoryText(allItems[wrapped].category || '');
+      // Pause current video
+      const currentVideo = videoRefs.current[s.currentIndex];
+      if (currentVideo) currentVideo.pause();
 
+      // Blast on entry
+      blast();
+
+      setTimeout(() => {
+        // Show new video
+        if (stack) {
+          const next = stack.children[wrapped];
+          if (next) { next.style.opacity = 1; next.style.zIndex = 1; }
+        }
+
+        s.currentIndex = wrapped;
+        loadVideoTexture(wrapped);
+        updateUI(allItems[wrapped], wrapped, total);
+
+        // Preload next
         const nextIdx = ((wrapped + 1) % total + total) % total;
         preloadVideo(nextIdx);
 
         setTimeout(() => { s.transitioning = false; }, 400);
       }, 50);
     }, 300);
-  }, [loadVideoTexture, scrambleText, preloadVideo]);
+  }, [blast, loadVideoTexture, updateUI, preloadVideo]);
 
-  // Setup Three.js
+  // Setup Three.js on work-canvas
   useEffect(() => {
-    if (loading || !itemsRef.current.length || !canvasRef.current) return;
+    if (loading || !items.length) return;
     const s = stateRef.current;
-    const canvas = canvasRef.current;
 
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    const canvasContainer = document.querySelector('.work-canvas');
+    if (!canvasContainer) return;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    canvasContainer.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
@@ -252,30 +309,35 @@ export default function WorkGrid({ onSwitchToList }) {
     handleResize();
     window.addEventListener('resize', handleResize);
 
+    // Now safe to load first video
     loadVideoTexture(0);
 
     const animate = () => {
       s.animId = requestAnimationFrame(animate);
       uniforms.time.value += 0.05;
       const d = gridData;
+
       for (let i = 0; i < GRID * GRID; i++) {
-        d[i * 4] *= 0.9;
-        d[i * 4 + 1] *= 0.9;
+        d[i * 4] *= RELAXATION;
+        d[i * 4 + 1] *= RELAXATION;
       }
+
       const gridMouseX = GRID * (s.mouseX / window.innerWidth);
       const gridMouseY = GRID * (1 - s.mouseY / window.innerHeight);
-      const maxDist = GRID * 0.1;
+      const maxDist = GRID * MOUSE_RADIUS;
+
       for (let i = 0; i < GRID; i++) {
         for (let j = 0; j < GRID; j++) {
           const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
           if (distSq < maxDist * maxDist) {
             const idx = 4 * (i + GRID * j);
             const power = Math.min(maxDist / Math.sqrt(distSq), 10);
-            d[idx] += 0.15 * 100 * s.mouseVX * power;
-            d[idx + 1] -= 0.15 * 100 * s.mouseVY * power;
+            d[idx] += MOUSE_STRENGTH * 100 * s.mouseVX * power;
+            d[idx + 1] -= MOUSE_STRENGTH * 100 * s.mouseVY * power;
           }
         }
       }
+
       dataTexture.needsUpdate = true;
       renderer.render(scene, camera);
     };
@@ -284,48 +346,45 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => {
       cancelAnimationFrame(s.animId);
       window.removeEventListener('resize', handleResize);
+      canvasContainer.innerHTML = '';
       renderer.dispose();
     };
-  }, [loading, loadVideoTexture]);
+  }, [loading, items, loadVideoTexture]);
 
+  // Scroll handling
   useEffect(() => {
-  if (!items.length) return;
-  const s = stateRef.current;
-  let lastScrollTime = 0;
-  const COOLDOWN = 800; // ms between navigations
+    if (!items.length) return;
+    const s = stateRef.current;
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    const handleWheel = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const now = Date.now();
+      if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
+      if (s.transitioning) return;
+      const delta = Math.abs(e.deltaY);
+      if (delta < 30) return;
+      s.lastScrollTime = now;
+      const direction = e.deltaY > 0 ? 1 : -1;
+      navigateTo(s.currentIndex + direction);
+    };
 
-    const now = Date.now();
-    if (now - lastScrollTime < COOLDOWN) return;
-    if (s.transitioning) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
+    };
 
-    const delta = Math.abs(e.deltaY);
-    if (delta < 30) return;
+    const wrapper = document.getElementById('work-grid-root');
+    if (wrapper) wrapper.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('keydown', handleKeyDown);
 
-    lastScrollTime = now;
-    const direction = e.deltaY > 0 ? 1 : -1;
-    navigateTo(s.currentIndex + direction);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') navigateTo(s.currentIndex + 1);
-    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') navigateTo(s.currentIndex - 1);
-  };
-
-  const wrapper = document.getElementById('work-grid-root');
-  if (wrapper) wrapper.addEventListener('wheel', handleWheel, { passive: false });
-  window.addEventListener('wheel', handleWheel, { passive: false });
-  window.addEventListener('keydown', handleKeyDown);
-
-  return () => {
-    if (wrapper) wrapper.removeEventListener('wheel', handleWheel);
-    window.removeEventListener('wheel', handleWheel);
-    window.removeEventListener('keydown', handleKeyDown);
-  };
-}, [items, navigateTo]);
+    return () => {
+      if (wrapper) wrapper.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [items, navigateTo]);
 
   // Mouse tracking
   useEffect(() => {
@@ -337,72 +396,59 @@ export default function WorkGrid({ onSwitchToList }) {
       s.prevMouseY = s.mouseY;
       s.mouseX = e.clientX;
       s.mouseY = e.clientY;
-      setCursorPos({ x: e.clientX, y: e.clientY });
     };
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Click to open project
-  const handleClick = useCallback(() => {
+  // Toggle handlers — wire up Webflow buttons
+  useEffect(() => {
+    const btnGrid = document.querySelector('.btn-grid');
+    const btnList = document.querySelector('.btn-list');
+    const gridWrap = document.querySelector('.work-grid-wrap');
+    const listWrap = document.querySelector('.work-list-wrap');
+
+    if (!btnGrid || !btnList) return;
+
+    const showGrid = () => {
+      if (gridWrap) gridWrap.style.display = 'block';
+      if (listWrap) listWrap.style.display = 'none';
+    };
+
+    const showList = () => {
+      if (gridWrap) gridWrap.style.display = 'none';
+      if (listWrap) listWrap.style.display = 'block';
+      onSwitchToList?.();
+    };
+
+    btnGrid.addEventListener('click', showGrid);
+    btnList.addEventListener('click', showList);
+
+    return () => {
+      btnGrid.removeEventListener('click', showGrid);
+      btnList.removeEventListener('click', showList);
+    };
+  }, [onSwitchToList]);
+
+  // Click to open project — will trigger Barba.js later
+  useEffect(() => {
+    if (!items.length) return;
     const s = stateRef.current;
-    const allItems = itemsRef.current;
-    if (s.transitioning || !allItems.length) return;
-    const item = allItems[s.currentIndex];
-    if (item) window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
-  }, []);
+    const stack = document.querySelector('.video-stack');
+    if (!stack) return;
 
-  if (loading) return <div className="work-grid-loading">LOADING WORK...</div>;
+    const handleClick = () => {
+      if (s.transitioning) return;
+      const item = itemsRef.current[s.currentIndex];
+      if (item) {
+        window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
+      }
+    };
 
-  return (
-    <div
-      ref={wrapperRef}
-      className="work-grid-wrapper"
-      onClick={handleClick}
-      onMouseEnter={() => setCursorVisible(true)}
-      onMouseLeave={() => setCursorVisible(false)}
-    >
-      {items.map((item, i) => (
-        <div
-          key={item.id}
-          className="work-grid-video-layer"
-          style={{ opacity: i === currentIndex ? 1 : 0, zIndex: i === currentIndex ? 1 : 0 }}
-        >
-          <video
-            ref={el => videoRefs.current[i] = el}
-            muted
-            loop
-            playsInline
-            crossOrigin="anonymous"
-          />
-        </div>
-      ))}
+    stack.addEventListener('click', handleClick);
+    return () => stack.removeEventListener('click', handleClick);
+  }, [items]);
 
-      <canvas ref={canvasRef} className="work-grid-canvas" />
-
-      <div className="work-grid-title">
-        <p className="work-grid-title-name">{titleText}</p>
-        <p className="work-grid-title-category">{categoryText}</p>
-      </div>
-
-      <div className="work-grid-counter">
-        {String(currentIndex + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}
-      </div>
-
-      <div className="work-grid-toggle">
-        <button className="active" onClick={e => e.stopPropagation()}>GRID</button>
-        <button
-          className="inactive"
-          onClick={e => { e.stopPropagation(); onSwitchToList?.(); }}
-        >LIST</button>
-      </div>
-
-      <div
-        className="work-cursor"
-        style={{ left: cursorPos.x, top: cursorPos.y, opacity: cursorVisible ? 1 : 0 }}
-      >
-        <div className="work-cursor-label">VIEW</div>
-      </div>
-    </div>
-  );
+  // No JSX output — everything is in Webflow DOM
+  return null;
 }
