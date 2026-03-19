@@ -382,8 +382,7 @@ export default function ArchiveCanvas() {
           const screenY = row * cellH + s.y + masonryOffset + s.smoothVy * parallax * 20 * verticalDominance;
 
           const isActive = s.activeCol === col && s.activeRow === row;
-          const domOverlayExists = !!document.getElementById('archive-active-block');
-          if (isActive && domOverlayExists) continue;
+          if (isActive) continue;
 
           const opacity = s._locked ? s.globalOpacity : 1;
 
@@ -527,31 +526,36 @@ export default function ArchiveCanvas() {
         const targetTop = targetBlockCenterY - scaledH / 2;
 
         activeImg = document.createElement('div');
-        activeImg.id = 'archive-active-block';
-        activeImg.style.cssText = `
-          position: fixed;
-          z-index: 1003;
-          pointer-events: none;
-          background-image: url(${item.image});
-          background-size: cover;
-          background-position: center;
-          left: ${currentBlockScreenX}px;
-          top: ${currentBlockScreenY}px;
-          width: ${blockW}px;
-          height: ${blockH}px;
-          transition: left 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                      top 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                      width 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                      height 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-        `;
-        document.body.appendChild(activeImg);
+activeImg.id = 'archive-active-block';
+activeImg.style.cssText = `
+  position: fixed;
+  z-index: 1003;
+  pointer-events: none;
+  background-image: url(${item.image});
+  background-size: cover;
+  background-position: center;
+  left: ${currentBlockScreenX}px;
+  top: ${currentBlockScreenY}px;
+  width: ${blockW}px;
+  height: ${blockH}px;
+`;
+document.body.appendChild(activeImg);
 
-        setTimeout(() => {
-          activeImg.style.left = targetLeft + 'px';
-          activeImg.style.top = targetTop + 'px';
-          activeImg.style.width = scaledW + 'px';
-          activeImg.style.height = scaledH + 'px';
-        }, 50);
+// Force a paint before adding transition so initial position is instant
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    activeImg.style.transition = `
+      left 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      top 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      width 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      height 0.7s cubic-bezier(0.16, 1, 0.3, 1)
+    `;
+    activeImg.style.left = targetLeft + 'px';
+    activeImg.style.top = targetTop + 'px';
+    activeImg.style.width = scaledW + 'px';
+    activeImg.style.height = scaledH + 'px';
+  });
+});
 
         // Add WebGL distortion after block is in position (desktop only)
         if (window.innerWidth >= 1024) {
