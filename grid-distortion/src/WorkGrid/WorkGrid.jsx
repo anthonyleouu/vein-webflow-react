@@ -30,6 +30,9 @@ const MOUSE_RADIUS = 0.08;
 const RELAXATION = 0.92;
 const BLAST_STRENGTH = 20;
 const SCROLL_COOLDOWN = 900;
+const LIST_ITEM_W = 0.35;
+const LIST_ITEM_H = 0.45;
+const LIST_GAP = 6;
 
 function injectStyle(id, css) {
   let el = document.getElementById(id);
@@ -45,6 +48,9 @@ export default function WorkGrid({ onSwitchToList }) {
   const itemsRef = useRef([]);
   const videoRefs = useRef([]);
   const wrapperRefs = useRef([]);
+  const listOffsetRef = useRef(0);
+  const listSnapTimerRef = useRef(null);
+
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
@@ -64,7 +70,6 @@ export default function WorkGrid({ onSwitchToList }) {
     gridData: null,
     lastScrollTime: 0,
     isListView: false,
-    listIndex: 0,
   });
 
   const [items, setItems] = useState([]);
@@ -84,6 +89,7 @@ export default function WorkGrid({ onSwitchToList }) {
         overflow: hidden;
         will-change: transform, opacity;
         transform-origin: center center;
+        transition: opacity 0.6s ease;
       }
       .grid-video-item video {
         position: absolute;
@@ -127,7 +133,6 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -141,10 +146,8 @@ export default function WorkGrid({ onSwitchToList }) {
       const wrapper = document.createElement('div');
       wrapper.className = 'grid-video-item';
       wrapper.style.cssText = `
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
         opacity: ${i === 0 ? 1 : 0};
         z-index: ${i === 0 ? 1 : 0};
       `;
@@ -160,6 +163,19 @@ export default function WorkGrid({ onSwitchToList }) {
       wrapperRefs.current[i] = wrapper;
       videoRefs.current[i] = video;
     });
+
+    // Overlay on top of all videos
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.15);
+      z-index: 10;
+      pointer-events: none;
+    `;
+    stack.appendChild(overlay);
 
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
@@ -186,14 +202,12 @@ export default function WorkGrid({ onSwitchToList }) {
       texture.magFilter = THREE.LinearFilter;
       texture.wrapS = THREE.ClampToEdgeWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
-
       s.uniforms.uTexture.value = texture;
 
       const W = window.innerWidth;
       const H = window.innerHeight;
       const containerAspect = W / H;
       const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
-
       let scaleX, scaleY;
       if (containerAspect > videoAspect) {
         scaleX = containerAspect;
@@ -212,7 +226,6 @@ export default function WorkGrid({ onSwitchToList }) {
         }
       };
       fadeIn();
-
       video.play().catch(() => {});
     }, { once: true });
 
@@ -252,71 +265,131 @@ export default function WorkGrid({ onSwitchToList }) {
 
     blastExit();
 
+    if (wrapperRefs.current[s.currentIndex]) {
+      wrapperRefs.current[s.currentIndex].style.opacity = 0;
+      wrapperRefs.current[s.currentIndex].style.zIndex = 0;
+    }
+    videoRefs.current[s.currentIndex]?.pause();
+
     setTimeout(() => {
-      if (wrapperRefs.current[s.currentIndex]) {
-        wrapperRefs.current[s.currentIndex].style.opacity = 0;
-        wrapperRefs.current[s.currentIndex].style.zIndex = 0;
-      }
-      videoRefs.current[s.currentIndex]?.pause();
-
-      setTimeout(() => {
-        if (wrapperRefs.current[wrapped]) {
+      if (wrapperRefs.current[wrapped]) {
+        wrapperRefs.current[wrapped].style.zIndex = 1;
+        requestAnimationFrame(() => {
           wrapperRefs.current[wrapped].style.opacity = 1;
-          wrapperRefs.current[wrapped].style.zIndex = 1;
-        }
+        });
+      }
 
-        s.currentIndex = wrapped;
-        loadVideoTexture(wrapped);
-        updateUI(allItems[wrapped], wrapped);
+      s.currentIndex = wrapped;
+      loadVideoTexture(wrapped);
+      updateUI(allItems[wrapped], wrapped);
 
-        const nextIdx = ((wrapped + 1) % total + total) % total;
-        preloadVideo(nextIdx);
+      const nextIdx = ((wrapped + 1) % total + total) % total;
+      preloadVideo(nextIdx);
 
-        setTimeout(() => { s.transitioning = false; }, 600);
-      }, 100);
+      setTimeout(() => { s.transitioning = false; }, 700);
     }, 400);
   }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
 
-  // List position calculator — wraps around so active is always centered
-  const getListPositions = useCallback((activeIdx) => {
+  const applyListPositions = useCallback((offset, animated = false) => {
     const W = window.innerWidth;
     const H = window.innerHeight;
-    const itemW = W * 0.35;
-    const itemH = H * 0.45;
+    const itemW = W * LIST_ITEM_W;
+    const itemH = H * LIST_ITEM_H;
+    const step = itemW + LIST_GAP;
     const centerX = (W - itemW) / 2;
     const centerY = (H - itemH) / 2;
     const total = wrapperRefs.current.length;
-    const positions = [];
 
-    for (let i = 0; i < total; i++) {
-      // Calculate offset wrapping around
-      let offset = i - activeIdx;
-      // Wrap: if offset > half total, subtract total
-      if (offset > total / 2) offset -= total;
-      if (offset < -total / 2) offset += total;
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
 
-      positions.push({
-        x: centerX + offset * itemW,
-        y: centerY,
-        w: itemW,
-        h: itemH,
-      });
-    }
-    return positions;
+      const rawX = centerX + (i * step) - offset;
+      const bandW = total * step;
+      let wrappedX = rawX;
+      while (wrappedX > centerX + step * Math.ceil(total / 2)) wrappedX -= bandW;
+      while (wrappedX < centerX - step * Math.ceil(total / 2)) wrappedX += bandW;
+
+      const scaleX = itemW / W;
+      const scaleY = itemH / H;
+      const translateX = wrappedX - (W * (1 - scaleX)) / 2;
+      const translateY = centerY - (H * (1 - scaleY)) / 2;
+
+      if (animated && window.gsap) {
+        window.gsap.to(wrapper, {
+          x: translateX, y: translateY,
+          scaleX, scaleY,
+          opacity: 1, zIndex: 1,
+          duration: 0.5,
+          ease: 'power2.out',
+          overwrite: true,
+        });
+      } else {
+        wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
+        wrapper.style.opacity = 1;
+        wrapper.style.zIndex = 1;
+      }
+    });
   }, []);
 
-  // Switch to LIST
+  const getClosestIndex = useCallback((offset) => {
+    const W = window.innerWidth;
+    const itemW = W * LIST_ITEM_W;
+    const step = itemW + LIST_GAP;
+    const total = itemsRef.current.length;
+
+    let closest = 0;
+    let minDist = Infinity;
+
+    for (let i = 0; i < total; i++) {
+      const itemCenter = i * step - offset + itemW / 2;
+      const screenCenter = W / 2;
+      const dist = Math.abs(itemCenter - screenCenter);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = i;
+      }
+    }
+    return closest;
+  }, []);
+
+  const snapToClosest = useCallback(() => {
+    const W = window.innerWidth;
+    const itemW = W * LIST_ITEM_W;
+    const step = itemW + LIST_GAP;
+    const s = stateRef.current;
+
+    const closest = getClosestIndex(listOffsetRef.current);
+    const targetOffset = closest * step;
+
+    s.currentIndex = closest;
+    updateUI(itemsRef.current[closest], closest);
+
+    if (window.gsap) {
+      window.gsap.to(listOffsetRef, {
+        current: targetOffset,
+        duration: 0.6,
+        ease: 'power3.out',
+        onUpdate: () => applyListPositions(listOffsetRef.current),
+      });
+    }
+  }, [getClosestIndex, updateUI, applyListPositions]);
+
   const switchToList = useCallback(() => {
     const s = stateRef.current;
     if (s.isListView || !window.gsap) return;
     s.isListView = true;
-    s.listIndex = s.currentIndex;
 
-    const positions = getListPositions(s.currentIndex);
     const W = window.innerWidth;
     const H = window.innerHeight;
+    const itemW = W * LIST_ITEM_W;
+    const itemH = H * LIST_ITEM_H;
+    const step = itemW + LIST_GAP;
+    const centerX = (W - itemW) / 2;
+    const centerY = (H - itemH) / 2;
+    const total = wrapperRefs.current.length;
 
-    // Load all videos
+    listOffsetRef.current = s.currentIndex * step;
+
     itemsRef.current.forEach((item, i) => {
       const video = videoRefs.current[i];
       if (video && !video.src) {
@@ -329,31 +402,31 @@ export default function WorkGrid({ onSwitchToList }) {
 
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
-      const pos = positions[i];
-      const scaleX = pos.w / W;
-      const scaleY = pos.h / H;
-      const translateX = pos.x - (W * (1 - scaleX)) / 2;
-      const translateY = pos.y - (H * (1 - scaleY)) / 2;
+      const scaleX = itemW / W;
+      const scaleY = itemH / H;
+
+      let offset = i - s.currentIndex;
+      if (offset > total / 2) offset -= total;
+      if (offset < -total / 2) offset += total;
+
+      const rawX = centerX + offset * step;
+      const translateX = rawX - (W * (1 - scaleX)) / 2;
+      const translateY = centerY - (H * (1 - scaleY)) / 2;
 
       window.gsap.to(wrapper, {
-        x: translateX,
-        y: translateY,
-        scaleX,
-        scaleY,
-        opacity: 1,
-        zIndex: i === s.currentIndex ? 2 : 1,
+        x: translateX, y: translateY,
+        scaleX, scaleY,
+        opacity: 1, zIndex: 1,
         duration: 1.8,
         ease: 'power3.inOut',
+        overwrite: true,
       });
     });
 
-    // Hide canvas
     const canvas = document.querySelector('.work-canvas');
     if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
+  }, []);
 
-  }, [getListPositions]);
-
-  // Switch back to GRID
   const switchToGrid = useCallback(() => {
     const s = stateRef.current;
     if (!s.isListView || !window.gsap) return;
@@ -362,62 +435,23 @@ export default function WorkGrid({ onSwitchToList }) {
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
       const isActive = i === s.currentIndex;
-
       window.gsap.to(wrapper, {
-        x: 0,
-        y: 0,
-        scaleX: 1,
-        scaleY: 1,
+        x: 0, y: 0,
+        scaleX: 1, scaleY: 1,
         opacity: isActive ? 1 : 0,
         zIndex: isActive ? 1 : 0,
         duration: 1.2,
         ease: 'power3.inOut',
+        overwrite: true,
         onComplete: () => {
           if (!isActive) videoRefs.current[i]?.pause();
         },
       });
     });
 
-    // Show canvas
     const canvas = document.querySelector('.work-canvas');
     if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
-
   }, []);
-
-  // List navigation — scroll moves between projects
-  const navigateList = useCallback((direction) => {
-    const s = stateRef.current;
-    if (!s.isListView || !window.gsap) return;
-    const total = itemsRef.current.length;
-    s.listIndex = ((s.listIndex + direction) % total + total) % total;
-    s.currentIndex = s.listIndex;
-
-    const positions = getListPositions(s.listIndex);
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-
-    // Update title
-    updateUI(itemsRef.current[s.listIndex], s.listIndex);
-
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper) return;
-      const pos = positions[i];
-      const scaleX = pos.w / W;
-      const scaleY = pos.h / H;
-      const translateX = pos.x - (W * (1 - scaleX)) / 2;
-      const translateY = pos.y - (H * (1 - scaleY)) / 2;
-
-      window.gsap.to(wrapper, {
-        x: translateX,
-        y: translateY,
-        scaleX,
-        scaleY,
-        zIndex: i === s.listIndex ? 2 : 1,
-        duration: 0.6,
-        ease: 'power2.out',
-      });
-    });
-  }, [getListPositions, updateUI]);
 
   // Setup Three.js
   useEffect(() => {
@@ -428,8 +462,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!canvasContainer) return;
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
+      antialias: true, alpha: true,
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -441,9 +474,7 @@ export default function WorkGrid({ onSwitchToList }) {
     camera.position.z = 2;
 
     const gridData = new Float32Array(4 * GRID * GRID);
-    const dataTexture = new THREE.DataTexture(
-      gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType
-    );
+    const dataTexture = new THREE.DataTexture(gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType);
     dataTexture.needsUpdate = true;
 
     const uniforms = {
@@ -530,7 +561,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [loading, items, loadVideoTexture, preloadVideo]);
 
-  // Scroll — grid navigation + list navigation
+  // Scroll
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -538,19 +569,21 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const now = Date.now();
-      if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
-      s.lastScrollTime = now;
-
-      const direction = e.deltaY > 0 ? 1 : -1;
 
       if (s.isListView) {
-        navigateList(direction);
-      } else {
-        if (s.transitioning) return;
-        if (Math.abs(e.deltaY) < 30) return;
-        navigateTo(s.currentIndex + direction);
+        listOffsetRef.current += e.deltaY * 0.8;
+        applyListPositions(listOffsetRef.current);
+        clearTimeout(listSnapTimerRef.current);
+        listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
+        return;
       }
+
+      const now = Date.now();
+      if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
+      if (s.transitioning) return;
+      if (Math.abs(e.deltaY) < 30) return;
+      s.lastScrollTime = now;
+      navigateTo(s.currentIndex + (e.deltaY > 0 ? 1 : -1));
     };
 
     const handleKeyDown = (e) => {
@@ -559,8 +592,17 @@ export default function WorkGrid({ onSwitchToList }) {
         e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
       if (!direction) return;
 
-      if (s.isListView) navigateList(direction);
-      else navigateTo(s.currentIndex + direction);
+      if (s.isListView) {
+        const W = window.innerWidth;
+        const itemW = W * LIST_ITEM_W;
+        const step = itemW + LIST_GAP;
+        listOffsetRef.current += direction * step;
+        applyListPositions(listOffsetRef.current, true);
+        clearTimeout(listSnapTimerRef.current);
+        listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
+      } else {
+        navigateTo(s.currentIndex + direction);
+      }
     };
 
     const wrapper = document.getElementById('work-grid-root');
@@ -572,8 +614,9 @@ export default function WorkGrid({ onSwitchToList }) {
       if (wrapper) wrapper.removeEventListener('wheel', handleWheel);
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeyDown);
+      clearTimeout(listSnapTimerRef.current);
     };
-  }, [items, navigateTo, navigateList]);
+  }, [items, navigateTo, applyListPositions, snapToClosest]);
 
   // Mouse
   useEffect(() => {
