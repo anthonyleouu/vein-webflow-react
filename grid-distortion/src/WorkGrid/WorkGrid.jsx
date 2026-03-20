@@ -24,11 +24,11 @@ const fragmentShader = `
   }
 `;
 
-const GRID = 15;
+const GRID = 20;
 const MOUSE_STRENGTH = 0.03;
-const MOUSE_RADIUS = 0.08;
+const MOUSE_RADIUS = 0.1;
 const RELAXATION = 0.92;
-const BLAST_STRENGTH = 20;
+const BLAST_STRENGTH = 15;
 const SCROLL_COOLDOWN = 900;
 const LIST_ITEM_W = 0.4;
 const LIST_ITEM_H = 0.45;
@@ -185,53 +185,59 @@ export default function WorkGrid({ onSwitchToList }) {
   }, [loading, items]);
 
   const loadVideoTexture = useCallback((index) => {
-    const s = stateRef.current;
-    if (!s.uniforms) return;
-    const allItems = itemsRef.current;
-    if (!allItems.length) return;
-    const item = allItems[index];
-    if (!item?.videoUrl) return;
-    const video = videoRefs.current[index];
-    if (!video) return;
+  const s = stateRef.current;
+  if (!s.uniforms) return;
+  const allItems = itemsRef.current;
+  if (!allItems.length) return;
+  const item = allItems[index];
+  if (!item?.videoUrl) return;
+  const video = videoRefs.current[index];
+  if (!video) return;
 
-    video.crossOrigin = 'anonymous';
-    video.src = item.videoUrl;
+  video.crossOrigin = 'anonymous';
 
-    video.addEventListener('loadedmetadata', () => {
-      const texture = new THREE.VideoTexture(video);
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.wrapS = THREE.ClampToEdgeWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
-      s.uniforms.uTexture.value = texture;
+  const applyTexture = () => {
+    const texture = new THREE.VideoTexture(video);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    s.uniforms.uTexture.value = texture;
 
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      const containerAspect = W / H;
-      const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
-      let scaleX, scaleY;
-      if (containerAspect > videoAspect) {
-        scaleX = containerAspect;
-        scaleY = containerAspect / videoAspect;
-      } else {
-        scaleX = videoAspect;
-        scaleY = 1;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const containerAspect = W / H;
+    const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
+    let scaleX, scaleY;
+    if (containerAspect > videoAspect) {
+      scaleX = containerAspect;
+      scaleY = containerAspect / videoAspect;
+    } else {
+      scaleX = videoAspect;
+      scaleY = 1;
+    }
+    if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
+
+    s.uniforms.uAlpha.value = 0;
+    const fadeIn = () => {
+      if (s.uniforms.uAlpha.value < 1) {
+        s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.03, 1);
+        requestAnimationFrame(fadeIn);
       }
-      if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
+    };
+    fadeIn();
+    video.play().catch(() => {});
+  };
 
-      s.uniforms.uAlpha.value = 0;
-      const fadeIn = () => {
-        if (s.uniforms.uAlpha.value < 1) {
-          s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.03, 1);
-          requestAnimationFrame(fadeIn);
-        }
-      };
-      fadeIn();
-      video.play().catch(() => {});
-    }, { once: true });
-
+  // If already loaded, apply immediately
+  if (video.readyState >= 2) {
+    applyTexture();
+  } else {
+    video.src = item.videoUrl;
+    video.addEventListener('loadedmetadata', applyTexture, { once: true });
     video.load();
-  }, []);
+  }
+}, []);
 
   const preloadVideo = useCallback((index) => {
     const allItems = itemsRef.current;
