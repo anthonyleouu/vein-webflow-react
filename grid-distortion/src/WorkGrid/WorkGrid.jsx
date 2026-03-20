@@ -552,14 +552,31 @@ export default function WorkGrid({ onSwitchToList }) {
   const total = itemsRef.current.length;
   const bandW = total * step;
 
-  listOffsetRef.current += e.deltaY * 0.8;
+  // Add momentum — larger delta = bigger throw
+  const momentum = e.deltaY * 2.5;
+  const targetOffset = listOffsetRef.current + momentum;
 
-  // Normalize offset to prevent it growing unboundedly
-  listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+  // Animate to target with ease out — feels like a throw
+  if (window.gsap) {
+    window.gsap.killTweensOf(listOffsetRef);
+    window.gsap.to(listOffsetRef, {
+      current: targetOffset,
+      duration: 0.8,
+      ease: 'power3.out',
+      overwrite: true,
+      onUpdate: () => {
+        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        applyListPositions(listOffsetRef.current);
+      },
+    });
+  } else {
+    listOffsetRef.current = ((targetOffset % bandW) + bandW) % bandW;
+    applyListPositions(listOffsetRef.current);
+  }
 
-  applyListPositions(listOffsetRef.current);
+  // Snap after scrolling stops
   clearTimeout(listSnapTimerRef.current);
-  listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
+  listSnapTimerRef.current = setTimeout(() => snapToClosest(), 500);
   return;
 }
 
