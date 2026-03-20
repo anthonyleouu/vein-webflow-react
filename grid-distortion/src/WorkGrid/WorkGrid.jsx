@@ -176,6 +176,7 @@ export default function WorkGrid({ onSwitchToList }) {
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
+      video.autoplay = true;
       video.crossOrigin = 'anonymous';
 
       wrapper.appendChild(video);
