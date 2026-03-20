@@ -116,7 +116,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (counterEl) scramble(counterEl, `[PROJECT ${num}]`);
   }, [scramble]);
 
-  // Fetch items
   useEffect(() => {
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
@@ -129,7 +128,6 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build video elements — each with its own hidden video
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -159,7 +157,6 @@ export default function WorkGrid({ onSwitchToList }) {
       videoRefs.current[i] = video;
     });
 
-    // Dark overlay
     const overlay = document.createElement('div');
     overlay.style.cssText = `
       position: absolute; inset: 0;
@@ -168,14 +165,12 @@ export default function WorkGrid({ onSwitchToList }) {
     `;
     stack.appendChild(overlay);
 
-    // Set initial UI text
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
     if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
     if (counterEl) counterEl.textContent = '[PROJECT 01]';
   }, [loading, items]);
 
-  // Setup Three.js — mirrors GridDistortion.jsx exactly
   useEffect(() => {
     if (loading || !items.length) return;
 
@@ -184,8 +179,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const scene = new THREE.Scene();
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
+      antialias: true, alpha: true,
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -203,10 +197,8 @@ export default function WorkGrid({ onSwitchToList }) {
       uDataTexture: { value: null },
     };
 
-    // Initialize data texture with random values — creates the load animation
     const size = GRID;
     const data = new Float32Array(4 * size * size);
-// Start at zero — no green tint on load
     const dataTexture = new THREE.DataTexture(
       data, size, size, THREE.RGBAFormat, THREE.FloatType
     );
@@ -215,9 +207,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const material = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
-      uniforms,
-      vertexShader,
-      fragmentShader,
+      uniforms, vertexShader, fragmentShader,
       transparent: true,
     });
 
@@ -225,11 +215,9 @@ export default function WorkGrid({ onSwitchToList }) {
     const plane = new THREE.Mesh(geometry, material);
     scene.add(plane);
 
-    // Load first video texture
     const loadTexture = (index) => {
       const video = videoRefs.current[index];
       if (!video) return;
-
       const apply = () => {
         const texture = new THREE.VideoTexture(video);
         texture.minFilter = THREE.LinearFilter;
@@ -237,7 +225,6 @@ export default function WorkGrid({ onSwitchToList }) {
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
         uniforms.uTexture.value = texture;
-
         const rect = container.getBoundingClientRect();
         const W = rect.width || window.innerWidth;
         const H = rect.height || window.innerHeight;
@@ -254,18 +241,11 @@ export default function WorkGrid({ onSwitchToList }) {
         plane.scale.set(scaleX, scaleY, 1);
         video.play().catch(() => {});
       };
-
-      if (video.readyState >= 1) {
-        apply();
-      } else {
-        video.addEventListener('loadedmetadata', apply, { once: true });
-      }
+      if (video.readyState >= 1) apply();
+      else video.addEventListener('loadedmetadata', apply, { once: true });
     };
 
-    threeRef.current = {
-      renderer, scene, camera, plane, uniforms,
-      dataTexture, data, loadTexture,
-    };
+    threeRef.current = { renderer, scene, camera, plane, uniforms, dataTexture, data, loadTexture };
 
     const handleResize = () => {
       const rect = container.getBoundingClientRect();
@@ -293,18 +273,15 @@ export default function WorkGrid({ onSwitchToList }) {
     const animate = () => {
       animId = requestAnimationFrame(animate);
       uniforms.time.value += 0.05;
-
       const d = data;
       for (let i = 0; i < size * size; i++) {
         d[i * 4] *= RELAXATION;
         d[i * 4 + 1] *= RELAXATION;
       }
-
       const m = mouseRef.current;
       const gridMouseX = size * m.x;
       const gridMouseY = size * m.y;
       const maxDist = size * MOUSE;
-
       for (let i = 0; i < size; i++) {
         for (let j = 0; j < size; j++) {
           const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
@@ -316,7 +293,6 @@ export default function WorkGrid({ onSwitchToList }) {
           }
         }
       }
-
       dataTexture.needsUpdate = true;
       if (uniforms.uTexture.value) uniforms.uTexture.value.needsUpdate = true;
       renderer.render(scene, camera);
@@ -335,11 +311,9 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [loading, items]);
 
-  // Mouse tracking — relative to container like GridDistortion.jsx
   useEffect(() => {
     const container = document.querySelector('.work-canvas');
     if (!container) return;
-
     const handleMouseMove = (e) => {
       const rect = container.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
@@ -349,12 +323,10 @@ export default function WorkGrid({ onSwitchToList }) {
       m.vY = y - m.prevY;
       Object.assign(m, { x, y, prevX: x, prevY: y });
     };
-
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [loading]);
 
-  // Navigate — blast data texture, swap videos, swap WebGL texture
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -365,7 +337,6 @@ export default function WorkGrid({ onSwitchToList }) {
     const wrapped = ((newIndex % total) + total) % total;
     const three = threeRef.current;
 
-    // Blast distortion — same as homepage random init
     if (three.data && three.dataTexture) {
       for (let i = 0; i < GRID * GRID; i++) {
         three.data[i * 4] = (Math.random() - 0.5) * 30;
@@ -374,7 +345,6 @@ export default function WorkGrid({ onSwitchToList }) {
       three.dataTexture.needsUpdate = true;
     }
 
-    // Fade out current
     const currentWrapper = wrapperRefs.current[s.currentIndex];
     const nextWrapper = wrapperRefs.current[wrapped];
 
@@ -384,16 +354,13 @@ export default function WorkGrid({ onSwitchToList }) {
     }
 
     setTimeout(() => {
-      // Pause current video
       videoRefs.current[s.currentIndex]?.pause();
 
-      // Show next video
       if (nextWrapper) {
         nextWrapper.style.zIndex = '1';
         nextWrapper.style.opacity = '1';
       }
 
-      // Play next video and swap WebGL texture
       const nextVideo = videoRefs.current[wrapped];
       if (nextVideo) {
         nextVideo.play().catch(() => {});
@@ -413,7 +380,6 @@ export default function WorkGrid({ onSwitchToList }) {
     }, 400);
   }, [updateUI]);
 
-  // List positions
   const applyListPositions = useCallback((offset, animated = false) => {
     const W = window.innerWidth;
     const H = window.innerHeight;
@@ -428,7 +394,11 @@ export default function WorkGrid({ onSwitchToList }) {
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
       let rawX = centerX + (i * step) - offset;
-      rawX = ((rawX - centerX + bandW * 10) % bandW) - bandW / 2 + centerX;
+      const relativeToCentre = rawX - centerX;
+      const wrappedRel = ((relativeToCentre % bandW) + bandW) % bandW;
+      const finalRelative = wrappedRel > bandW / 2 ? wrappedRel - bandW : wrappedRel;
+      rawX = centerX + finalRelative;
+
       const scaleX = itemW / W;
       const scaleY = itemH / H;
       const translateX = rawX - (W * (1 - scaleX)) / 2;
@@ -453,9 +423,19 @@ export default function WorkGrid({ onSwitchToList }) {
     const itemW = W * LIST_ITEM_W;
     const step = itemW + LIST_GAP;
     const total = itemsRef.current.length;
-    let closest = 0, minDist = Infinity;
+    const bandW = total * step;
+    const centerX = (W - itemW) / 2;
+
+    let closest = 0;
+    let minDist = Infinity;
+
     for (let i = 0; i < total; i++) {
-      const dist = Math.abs(i * step - offset + itemW / 2 - W / 2);
+      let rawX = centerX + (i * step) - offset;
+      const rel = rawX - centerX;
+      const wrappedRel = ((rel % bandW) + bandW) % bandW;
+      const finalRel = wrappedRel > bandW / 2 ? wrappedRel - bandW : wrappedRel;
+      rawX = centerX + finalRel;
+      const dist = Math.abs(rawX + itemW / 2 - W / 2);
       if (dist < minDist) { minDist = dist; closest = i; }
     }
     return closest;
@@ -493,8 +473,6 @@ export default function WorkGrid({ onSwitchToList }) {
     const total = wrapperRefs.current.length;
 
     listOffsetRef.current = s.currentIndex * step;
-
-    // Play all videos
     videoRefs.current.forEach(v => v?.play().catch(() => {}));
 
     wrapperRefs.current.forEach((wrapper, i) => {
@@ -541,7 +519,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
   }, []);
 
-  // Scroll
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -593,7 +570,6 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [items, navigateTo, applyListPositions, snapToClosest]);
 
-  // Toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -608,7 +584,6 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [switchToGrid, switchToList, onSwitchToList]);
 
-  // Click to open project
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
