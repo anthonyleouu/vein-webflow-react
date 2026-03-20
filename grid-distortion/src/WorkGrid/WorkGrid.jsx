@@ -521,7 +521,7 @@ export default function WorkGrid({ onSwitchToList }) {
 
   const activeIndex = s.currentIndex;
 
-  // Instantly hide all non-active — keep their current transform, just hide them
+  // Instantly hide all non-active in their current positions
   wrapperRefs.current.forEach((wrapper, i) => {
     if (!wrapper || i === activeIndex) return;
     window.gsap.killTweensOf(wrapper);
@@ -529,56 +529,27 @@ export default function WorkGrid({ onSwitchToList }) {
     videoRefs.current[i]?.pause();
   });
 
-  // Animate active from its current visual position to fullscreen
+  // Animate active back to fullscreen using scale/translate
   const activeWrapper = wrapperRefs.current[activeIndex];
   if (activeWrapper) {
     window.gsap.killTweensOf(activeWrapper);
-
-    const rect = activeWrapper.getBoundingClientRect();
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-
-    window.gsap.fromTo(activeWrapper,
-      {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-        scaleX: 1,
-        scaleY: 1,
-        opacity: 1,
-        zIndex: 10,
+    window.gsap.to(activeWrapper, {
+      x: 0, y: 0, scaleX: 1, scaleY: 1,
+      opacity: 1, zIndex: 10,
+      duration: 1.2, ease: 'power3.inOut', overwrite: true,
+      onComplete: () => {
+        // Reset other wrappers transforms after active is fullscreen
+        wrapperRefs.current.forEach((wrapper, i) => {
+          if (!wrapper || i === activeIndex) return;
+          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+        });
+        const video = videoRefs.current[activeIndex];
+        if (video) {
+          video.play().catch(() => {});
+          threeRef.current.loadTexture?.(activeIndex);
+        }
       },
-      {
-        x: 0,
-        y: 0,
-        width: W,
-        height: H,
-        scaleX: 1,
-        scaleY: 1,
-        opacity: 1,
-        zIndex: 10,
-        duration: 1.2,
-        ease: 'power3.inOut',
-        overwrite: true,
-        onComplete: () => {
-          window.gsap.set(activeWrapper, {
-            x: 0, y: 0, width: '', height: '',
-            transformOrigin: 'center center',
-          });
-          // Now reset all other wrappers cleanly
-          wrapperRefs.current.forEach((wrapper, i) => {
-            if (!wrapper || i === activeIndex) return;
-            window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
-          });
-          const video = videoRefs.current[activeIndex];
-          if (video) {
-            video.play().catch(() => {});
-            threeRef.current.loadTexture?.(activeIndex);
-          }
-        },
-      }
-    );
+    });
   }
 
   const canvas = document.querySelector('.work-canvas');
