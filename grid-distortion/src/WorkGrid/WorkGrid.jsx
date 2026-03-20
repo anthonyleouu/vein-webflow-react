@@ -27,8 +27,8 @@ const fragmentShader = `
 const GRID = 20;
 const MOUSE_STRENGTH = 0.03;
 const MOUSE_RADIUS = 0.1;
-const RELAXATION = 0.92;
-const BLAST_STRENGTH = 5;
+const RELAXATION = 0.9;
+const BLAST_STRENGTH = 0.15;
 const SCROLL_COOLDOWN = 900;
 const LIST_ITEM_W = 0.4;
 const LIST_ITEM_H = 0.45;
@@ -90,7 +90,6 @@ export default function WorkGrid({ onSwitchToList }) {
         will-change: transform, opacity;
         transform-origin: center center;
         transition: opacity 1s ease;
-}
       }
       .grid-video-item video {
         position: absolute;
@@ -104,6 +103,26 @@ export default function WorkGrid({ onSwitchToList }) {
         height: 100% !important;
       }
     `);
+  }, []);
+
+  // Unlock autoplay on first user gesture
+  useEffect(() => {
+    const unlock = () => {
+      videoRefs.current.forEach(v => {
+        if (v) v.play().then(() => v.pause()).catch(() => {});
+      });
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('wheel', unlock);
+    };
+    window.addEventListener('click', unlock);
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('wheel', unlock);
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('wheel', unlock);
+    };
   }, []);
 
   const scramble = useCallback((element, text) => {
@@ -165,7 +184,6 @@ export default function WorkGrid({ onSwitchToList }) {
       videoRefs.current[i] = video;
     });
 
-    // Overlay on top of all videos
     const overlay = document.createElement('div');
     overlay.style.cssText = `
       position: absolute;
@@ -185,67 +203,63 @@ export default function WorkGrid({ onSwitchToList }) {
   }, [loading, items]);
 
   const loadVideoTexture = useCallback((index) => {
-  const s = stateRef.current;
-  if (!s.uniforms) return;
-  const allItems = itemsRef.current;
-  if (!allItems.length) return;
-  const item = allItems[index];
-  if (!item?.videoUrl) return;
-  const video = videoRefs.current[index];
-  if (!video) return;
+    const s = stateRef.current;
+    if (!s.uniforms) return;
+    const allItems = itemsRef.current;
+    if (!allItems.length) return;
+    const item = allItems[index];
+    if (!item?.videoUrl) return;
+    const video = videoRefs.current[index];
+    if (!video) return;
 
-  // Always create fresh texture
-  const texture = new THREE.VideoTexture(video);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  s.uniforms.uTexture.value = texture;
+    const applyTexture = () => {
+      const texture = new THREE.VideoTexture(video);
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      s.uniforms.uTexture.value = texture;
 
-  const applyScale = () => {
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const containerAspect = W / H;
-    const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
-    let scaleX, scaleY;
-    if (containerAspect > videoAspect) {
-      scaleX = containerAspect;
-      scaleY = containerAspect / videoAspect;
-    } else {
-      scaleX = videoAspect;
-      scaleY = 1;
-    }
-    if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
-  };
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const containerAspect = W / H;
+      const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
+      let scaleX, scaleY;
+      if (containerAspect > videoAspect) {
+        scaleX = containerAspect;
+        scaleY = containerAspect / videoAspect;
+      } else {
+        scaleX = videoAspect;
+        scaleY = 1;
+      }
+      if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
 
-  const fadeIn = () => {
-    s.uniforms.uAlpha.value = 0;
-    const tick = () => {
-      if (s.uniforms.uAlpha.value < 1) {
-        s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.03, 1);
-        requestAnimationFrame(tick);
+      s.uniforms.uAlpha.value = 0;
+      const tick = () => {
+        if (s.uniforms.uAlpha.value < 1) {
+          s.uniforms.uAlpha.value = Math.min(s.uniforms.uAlpha.value + 0.03, 1);
+          requestAnimationFrame(tick);
+        }
+      };
+      tick();
+
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          setTimeout(() => video.play().catch(() => {}), 300);
+        });
       }
     };
-    tick();
-  };
 
-  if (video.readyState >= 2) {
-    // Already has data — apply immediately
-    applyScale();
-    fadeIn();
-    video.play().catch(() => {});
-  } else {
-    // Not loaded yet — set src and wait
-    video.crossOrigin = 'anonymous';
-    video.src = item.videoUrl;
-    video.addEventListener('loadedmetadata', () => {
-      applyScale();
-      fadeIn();
-      video.play().catch(() => {});
-    }, { once: true });
-    video.load();
-  }
-}, []);
+    if (video.readyState >= 2) {
+      applyTexture();
+    } else {
+      video.crossOrigin = 'anonymous';
+      video.src = item.videoUrl;
+      video.addEventListener('loadedmetadata', applyTexture, { once: true });
+      video.load();
+    }
+  }, []);
 
   const preloadVideo = useCallback((index) => {
     const allItems = itemsRef.current;
@@ -270,102 +284,95 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const navigateTo = useCallback((newIndex) => {
-  const s = stateRef.current;
-  const allItems = itemsRef.current;
-  if (s.transitioning || !allItems.length || s.isListView) return;
-  s.transitioning = true;
+    const s = stateRef.current;
+    const allItems = itemsRef.current;
+    if (s.transitioning || !allItems.length || s.isListView) return;
+    s.transitioning = true;
 
-  const total = allItems.length;
-  const wrapped = ((newIndex % total) + total) % total;
+    const total = allItems.length;
+    const wrapped = ((newIndex % total) + total) % total;
 
-  blastExit();
+    blastExit();
 
-  const currentWrapper = wrapperRefs.current[s.currentIndex];
-  const nextWrapper = wrapperRefs.current[wrapped];
+    const currentWrapper = wrapperRefs.current[s.currentIndex];
+    const nextWrapper = wrapperRefs.current[wrapped];
 
-  // Pre-position next video behind current
-  if (nextWrapper) {
-    nextWrapper.style.zIndex = 0;
-    nextWrapper.style.opacity = 0;
-  }
+    if (nextWrapper) {
+      nextWrapper.style.zIndex = 0;
+      nextWrapper.style.opacity = 0;
+    }
 
-  // Use GSAP for smooth cross-fade
-  if (window.gsap && currentWrapper && nextWrapper) {
-    window.gsap.to(currentWrapper, {
-      opacity: 0,
-      duration: 0.8,
-      ease: 'power2.inOut',
-      onComplete: () => {
-        currentWrapper.style.zIndex = 0;
-        videoRefs.current[s.currentIndex]?.pause();
-      },
-    });
+    if (window.gsap && currentWrapper && nextWrapper) {
+      window.gsap.to(currentWrapper, {
+        opacity: 0,
+        duration: 0.8,
+        ease: 'power2.inOut',
+        onComplete: () => {
+          currentWrapper.style.zIndex = 0;
+          videoRefs.current[s.currentIndex]?.pause();
+        },
+      });
 
-    // Slight delay so fade-out starts before fade-in
-    window.gsap.to(nextWrapper, {
-      opacity: 1,
-      duration: 0.8,
-      delay: 0.3,
-      ease: 'power2.inOut',
-      onStart: () => { nextWrapper.style.zIndex = 1; },
-    });
-  } else {
-    // Fallback
-    if (currentWrapper) { currentWrapper.style.opacity = 0; currentWrapper.style.zIndex = 0; }
-    if (nextWrapper) { nextWrapper.style.opacity = 1; nextWrapper.style.zIndex = 1; }
-  }
-
-  s.currentIndex = wrapped;
-  loadVideoTexture(wrapped);
-  updateUI(allItems[wrapped], wrapped);
-
-  const nextIdx = ((wrapped + 1) % total + total) % total;
-  preloadVideo(nextIdx);
-
-  setTimeout(() => { s.transitioning = false; }, 1100);
-}, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
-
-  const applyListPositions = useCallback((offset, animated = false) => {
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  const itemW = W * LIST_ITEM_W;
-  const itemH = H * LIST_ITEM_H;
-  const step = itemW + LIST_GAP;
-  const centerX = (W - itemW) / 2;
-  const centerY = (H - itemH) / 2;
-  const total = wrapperRefs.current.length;
-  const bandW = total * step;
-
-  wrapperRefs.current.forEach((wrapper, i) => {
-    if (!wrapper) return;
-
-    // Raw position
-    let rawX = centerX + (i * step) - offset;
-
-    // Infinite wrap — keep each item within half a band of center
-    rawX = ((rawX - centerX + bandW * 10) % bandW) - bandW / 2 + centerX;
-
-    const scaleX = itemW / W;
-    const scaleY = itemH / H;
-    const translateX = rawX - (W * (1 - scaleX)) / 2;
-    const translateY = centerY - (H * (1 - scaleY)) / 2;
-
-    if (animated && window.gsap) {
-      window.gsap.to(wrapper, {
-        x: translateX, y: translateY,
-        scaleX, scaleY,
-        opacity: 1, zIndex: 1,
-        duration: 0.5,
-        ease: 'power2.out',
-        overwrite: true,
+      window.gsap.to(nextWrapper, {
+        opacity: 1,
+        duration: 0.8,
+        delay: 0.3,
+        ease: 'power2.inOut',
+        onStart: () => { nextWrapper.style.zIndex = 1; },
       });
     } else {
-      wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
-      wrapper.style.opacity = 1;
-      wrapper.style.zIndex = 1;
+      if (currentWrapper) { currentWrapper.style.opacity = 0; currentWrapper.style.zIndex = 0; }
+      if (nextWrapper) { nextWrapper.style.opacity = 1; nextWrapper.style.zIndex = 1; }
     }
-  });
-}, []);
+
+    s.currentIndex = wrapped;
+    loadVideoTexture(wrapped);
+    updateUI(allItems[wrapped], wrapped);
+
+    const nextIdx = ((wrapped + 1) % total + total) % total;
+    preloadVideo(nextIdx);
+
+    setTimeout(() => { s.transitioning = false; }, 1100);
+  }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
+
+  const applyListPositions = useCallback((offset, animated = false) => {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const itemW = W * LIST_ITEM_W;
+    const itemH = H * LIST_ITEM_H;
+    const step = itemW + LIST_GAP;
+    const centerX = (W - itemW) / 2;
+    const centerY = (H - itemH) / 2;
+    const total = wrapperRefs.current.length;
+    const bandW = total * step;
+
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
+
+      let rawX = centerX + (i * step) - offset;
+      rawX = ((rawX - centerX + bandW * 10) % bandW) - bandW / 2 + centerX;
+
+      const scaleX = itemW / W;
+      const scaleY = itemH / H;
+      const translateX = rawX - (W * (1 - scaleX)) / 2;
+      const translateY = centerY - (H * (1 - scaleY)) / 2;
+
+      if (animated && window.gsap) {
+        window.gsap.to(wrapper, {
+          x: translateX, y: translateY,
+          scaleX, scaleY,
+          opacity: 1, zIndex: 1,
+          duration: 0.5,
+          ease: 'power2.out',
+          overwrite: true,
+        });
+      } else {
+        wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
+        wrapper.style.opacity = 1;
+        wrapper.style.zIndex = 1;
+      }
+    });
+  }, []);
 
   const getClosestIndex = useCallback((offset) => {
     const W = window.innerWidth;
@@ -489,7 +496,6 @@ export default function WorkGrid({ onSwitchToList }) {
     if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
   }, []);
 
-  // Setup Three.js
   useEffect(() => {
     if (loading || !items.length) return;
     const s = stateRef.current;
@@ -597,7 +603,6 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [loading, items, loadVideoTexture, preloadVideo]);
 
-  // Scroll
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -654,7 +659,6 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [items, navigateTo, applyListPositions, snapToClosest]);
 
-  // Mouse
   useEffect(() => {
     const s = stateRef.current;
     const handleMouseMove = (e) => {
@@ -669,7 +673,6 @@ export default function WorkGrid({ onSwitchToList }) {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -687,7 +690,6 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [switchToGrid, switchToList, onSwitchToList]);
 
-  // Click to open
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
