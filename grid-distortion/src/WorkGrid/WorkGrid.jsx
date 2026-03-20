@@ -76,6 +76,8 @@ export default function WorkGrid({ onSwitchToList }) {
         width: 100%;
         height: 100%;
         overflow: hidden;
+        text-decoration: none;
+        display: block;
       }
       .grid-video-item video {
         position: absolute;
@@ -140,7 +142,6 @@ export default function WorkGrid({ onSwitchToList }) {
       const wrapper = document.createElement('a');
       wrapper.className = 'grid-video-item';
       wrapper.href = `/work/${item.slug}`;
-      wrapper.style.cursor = 'pointer';
       wrapper.style.opacity = i === 0 ? '1' : '0';
       wrapper.style.zIndex = i === 0 ? '1' : '0';
 
@@ -449,7 +450,6 @@ export default function WorkGrid({ onSwitchToList }) {
     s.currentIndex = closest;
     updateUI(itemsRef.current[closest], closest);
 
-    // When active changes, move previous active to its list position
     if (prevIndex !== closest) {
       const prevWrapper = wrapperRefs.current[prevIndex];
       if (prevWrapper && window.gsap) {
@@ -484,11 +484,8 @@ export default function WorkGrid({ onSwitchToList }) {
           applyListPositions(listOffsetRef.current);
         },
         onComplete: () => {
-  // Small delay to ensure animation fully completes
-  setTimeout(() => {
-    window.location.href = `/work/${item.slug}`;
-  }, 50);
-},
+          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        }
       });
     }
   }, [getClosestIndex, updateUI, applyListPositions]);
@@ -529,7 +526,6 @@ export default function WorkGrid({ onSwitchToList }) {
           ease: 'power3.inOut', overwrite: true,
         });
       } else {
-        // Instantly place at list position, then fade in
         window.gsap.set(wrapper, {
           x: translateX, y: translateY, scaleX, scaleY, zIndex: 1,
         });
@@ -553,7 +549,6 @@ export default function WorkGrid({ onSwitchToList }) {
     const W = window.innerWidth;
     const H = window.innerHeight;
 
-    // Kill all tweens and immediately hide EVERYTHING
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
       window.gsap.killTweensOf(wrapper);
@@ -561,7 +556,6 @@ export default function WorkGrid({ onSwitchToList }) {
       if (i !== activeIndex) videoRefs.current[i]?.pause();
     });
 
-    // Double rAF ensures browser paints opacity:0 before we show active
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const activeWrapper = wrapperRefs.current[activeIndex];
@@ -688,58 +682,62 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [switchToGrid, switchToList, onSwitchToList]);
 
+  // Click to navigate to project page
   useEffect(() => {
-  if (!items.length) return;
-  const s = stateRef.current;
-  const stack = document.querySelector('.video-stack');
-  if (!stack) return;
+    if (!items.length) return;
+    const s = stateRef.current;
+    const stack = document.querySelector('.video-stack');
+    if (!stack) return;
 
-  const handleClick = () => {
-    if (s.transitioning) return;
-    const item = itemsRef.current[s.currentIndex];
-    if (!item?.slug) return;
+    const handleClick = (e) => {
+      e.preventDefault();
+      if (s.transitioning) return;
+      const item = itemsRef.current[s.currentIndex];
+      if (!item?.slug) return;
 
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const targetW = W * 0.52;
-    const targetH = H * 0.62;
-    const targetX = (W - targetW) / 2;
-    const targetY = (H - targetH) / 2;
-    const scaleX = targetW / W;
-    const scaleY = targetH / H;
-    const x = targetX - (W * (1 - scaleX)) / 2;
-    const y = targetY - (H * (1 - scaleY)) / 2;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const targetW = W * 0.52;
+      const targetH = H * 0.62;
+      const targetX = (W - targetW) / 2;
+      const targetY = (H - targetH) / 2;
+      const scaleX = targetW / W;
+      const scaleY = targetH / H;
+      const x = targetX - (W * (1 - scaleX)) / 2;
+      const y = targetY - (H * (1 - scaleY)) / 2;
 
-    const activeWrapper = wrapperRefs.current[s.currentIndex];
+      const activeWrapper = wrapperRefs.current[s.currentIndex];
 
-    // Hide all other videos instantly
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper || i === s.currentIndex) return;
-      window.gsap?.set(wrapper, { opacity: 0 });
-    });
-
-    // Hide UI
-    window.gsap?.to(['.work-canvas', '.btn-grid', '.btn-list', '.title-name', '.work-counter'], {
-      opacity: 0, duration: 0.3,
-    });
-
-    // Scale video to center then navigate
-    if (activeWrapper && window.gsap) {
-      window.gsap.to(activeWrapper, {
-        x, y, scaleX, scaleY,
-        duration: 1.0, ease: 'power3.inOut',
-        onComplete: () => {
-          window.location.href = `/work/${item.slug}`;
-        },
+      // Hide all other videos instantly
+      wrapperRefs.current.forEach((wrapper, i) => {
+        if (!wrapper || i === s.currentIndex) return;
+        window.gsap?.set(wrapper, { opacity: 0 });
       });
-    } else {
-      window.location.href = `/work/${item.slug}`;
-    }
-  };
 
-  stack.addEventListener('click', handleClick);
-  return () => stack.removeEventListener('click', handleClick);
-}, [items]);
+      // Hide UI
+      window.gsap?.to(['.work-canvas', '.btn-grid', '.btn-list', '.title-name', '.work-counter'], {
+        opacity: 0, duration: 0.3,
+      });
+
+      // Scale video to center then navigate
+      if (activeWrapper && window.gsap) {
+        window.gsap.to(activeWrapper, {
+          x, y, scaleX, scaleY,
+          duration: 1.0, ease: 'power3.inOut',
+          onComplete: () => {
+            setTimeout(() => {
+              window.location.href = `/work/${item.slug}`;
+            }, 50);
+          },
+        });
+      } else {
+        window.location.href = `/work/${item.slug}`;
+      }
+    };
+
+    stack.addEventListener('click', handleClick);
+    return () => stack.removeEventListener('click', handleClick);
+  }, [items]);
 
   return null;
 }
