@@ -502,51 +502,60 @@ window.gsap.to(wrapper, {
 }, [getClosestIndex, updateUI, applyListPositions]);
 
   const switchToList = useCallback(() => {
-    const s = stateRef.current;
-    if (s.isListView || !window.gsap) return;
-    s.isListView = true;
+  const s = stateRef.current;
+  if (s.isListView || !window.gsap) return;
+  s.isListView = true;
 
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const itemW = W * LIST_ITEM_W;
-    const itemH = H * LIST_ITEM_H;
-    const step = itemW + LIST_GAP;
-    const centerX = (W - itemW) / 2;
-    const centerY = (H - itemH) / 2;
-    const total = wrapperRefs.current.length;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const itemW = W * LIST_ITEM_W;
+  const itemH = H * LIST_ITEM_H;
+  const step = itemW + LIST_GAP;
+  const centerX = (W - itemW) / 2;
+  const centerY = (H - itemH) / 2;
+  const total = wrapperRefs.current.length;
 
-    listOffsetRef.current = s.currentIndex * step;
+  listOffsetRef.current = s.currentIndex * step;
+  videoRefs.current.forEach(v => v?.play().catch(() => {}));
 
-    // Key fix: reset all non-active wrappers to hidden fullscreen
-    // before animating them to list positions
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper || i === s.currentIndex) return;
-      window.gsap.killTweensOf(wrapper);
-      window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
-    });
+  wrapperRefs.current.forEach((wrapper, i) => {
+    if (!wrapper) return;
+    const isActive = i === s.currentIndex;
+    const scaleX = itemW / W;
+    const scaleY = itemH / H;
+    let offset = i - s.currentIndex;
+    if (offset > total / 2) offset -= total;
+    if (offset < -total / 2) offset += total;
+    const rawX = centerX + offset * step;
+    const translateX = rawX - (W * (1 - scaleX)) / 2;
+    const translateY = centerY - (H * (1 - scaleY)) / 2;
 
-    videoRefs.current.forEach(v => v?.play().catch(() => {}));
-
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper) return;
-      const scaleX = itemW / W;
-      const scaleY = itemH / H;
-      let offset = i - s.currentIndex;
-      if (offset > total / 2) offset -= total;
-      if (offset < -total / 2) offset += total;
-      const rawX = centerX + offset * step;
-      const translateX = rawX - (W * (1 - scaleX)) / 2;
-      const translateY = centerY - (H * (1 - scaleY)) / 2;
+    if (isActive) {
+      // Active animates from fullscreen to list position
       window.gsap.to(wrapper, {
         x: translateX, y: translateY, scaleX, scaleY,
-        opacity: 1, zIndex: 1, duration: 1.8,
+        opacity: 1, zIndex: 2, duration: 1.8,
         ease: 'power3.inOut', overwrite: true,
       });
-    });
+    } else {
+      // Non-active: SET to their list position immediately, then fade in
+      window.gsap.set(wrapper, {
+        x: translateX, y: translateY, scaleX, scaleY,
+        zIndex: 1,
+      });
+      window.gsap.to(wrapper, {
+        opacity: 1,
+        duration: 0.8,
+        delay: 0.6,
+        ease: 'power2.out',
+        overwrite: true,
+      });
+    }
+  });
 
-    const canvas = document.querySelector('.work-canvas');
-    if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
-  }, []);
+  const canvas = document.querySelector('.work-canvas');
+  if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
+}, []);
 
   const switchToGrid = useCallback(() => {
     const s = stateRef.current;
