@@ -30,7 +30,7 @@ const MOUSE_RADIUS = 0.08;
 const RELAXATION = 0.92;
 const BLAST_STRENGTH = 20;
 const SCROLL_COOLDOWN = 900;
-const LIST_ITEM_W = 0.35;
+const LIST_ITEM_W = 0.4;
 const LIST_ITEM_H = 0.45;
 const LIST_GAP = 6;
 
@@ -89,7 +89,8 @@ export default function WorkGrid({ onSwitchToList }) {
         overflow: hidden;
         will-change: transform, opacity;
         transform-origin: center center;
-        transition: opacity 0.6s ease;
+        transition: opacity 1s ease;
+}
       }
       .grid-video-item video {
         position: absolute;
@@ -265,71 +266,76 @@ export default function WorkGrid({ onSwitchToList }) {
 
     blastExit();
 
-    if (wrapperRefs.current[s.currentIndex]) {
-      wrapperRefs.current[s.currentIndex].style.opacity = 0;
-      wrapperRefs.current[s.currentIndex].style.zIndex = 0;
-    }
-    videoRefs.current[s.currentIndex]?.pause();
+// Fade out current smoothly
+if (wrapperRefs.current[s.currentIndex]) {
+  wrapperRefs.current[s.currentIndex].style.opacity = 0;
+  wrapperRefs.current[s.currentIndex].style.zIndex = 0;
+}
+videoRefs.current[s.currentIndex]?.pause();
 
-    setTimeout(() => {
-      if (wrapperRefs.current[wrapped]) {
-        wrapperRefs.current[wrapped].style.zIndex = 1;
-        requestAnimationFrame(() => {
-          wrapperRefs.current[wrapped].style.opacity = 1;
-        });
-      }
+// Fade in next after current has faded out
+setTimeout(() => {
+  if (wrapperRefs.current[wrapped]) {
+    wrapperRefs.current[wrapped].style.zIndex = 1;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        wrapperRefs.current[wrapped].style.opacity = 1;
+      });
+    });
+  }
 
-      s.currentIndex = wrapped;
-      loadVideoTexture(wrapped);
-      updateUI(allItems[wrapped], wrapped);
+  s.currentIndex = wrapped;
+  loadVideoTexture(wrapped);
+  updateUI(allItems[wrapped], wrapped);
 
-      const nextIdx = ((wrapped + 1) % total + total) % total;
-      preloadVideo(nextIdx);
+  const nextIdx = ((wrapped + 1) % total + total) % total;
+  preloadVideo(nextIdx);
 
-      setTimeout(() => { s.transitioning = false; }, 700);
-    }, 400);
+  setTimeout(() => { s.transitioning = false; }, 800);
+}, 500);
   }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
 
   const applyListPositions = useCallback((offset, animated = false) => {
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const itemW = W * LIST_ITEM_W;
-    const itemH = H * LIST_ITEM_H;
-    const step = itemW + LIST_GAP;
-    const centerX = (W - itemW) / 2;
-    const centerY = (H - itemH) / 2;
-    const total = wrapperRefs.current.length;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const itemW = W * LIST_ITEM_W;
+  const itemH = H * LIST_ITEM_H;
+  const step = itemW + LIST_GAP;
+  const centerX = (W - itemW) / 2;
+  const centerY = (H - itemH) / 2;
+  const total = wrapperRefs.current.length;
+  const bandW = total * step;
 
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper) return;
+  wrapperRefs.current.forEach((wrapper, i) => {
+    if (!wrapper) return;
 
-      const rawX = centerX + (i * step) - offset;
-      const bandW = total * step;
-      let wrappedX = rawX;
-      while (wrappedX > centerX + step * Math.ceil(total / 2)) wrappedX -= bandW;
-      while (wrappedX < centerX - step * Math.ceil(total / 2)) wrappedX += bandW;
+    // Raw position
+    let rawX = centerX + (i * step) - offset;
 
-      const scaleX = itemW / W;
-      const scaleY = itemH / H;
-      const translateX = wrappedX - (W * (1 - scaleX)) / 2;
-      const translateY = centerY - (H * (1 - scaleY)) / 2;
+    // Infinite wrap — keep each item within half a band of center
+    rawX = ((rawX - centerX + bandW * 10) % bandW) - bandW / 2 + centerX;
 
-      if (animated && window.gsap) {
-        window.gsap.to(wrapper, {
-          x: translateX, y: translateY,
-          scaleX, scaleY,
-          opacity: 1, zIndex: 1,
-          duration: 0.5,
-          ease: 'power2.out',
-          overwrite: true,
-        });
-      } else {
-        wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
-        wrapper.style.opacity = 1;
-        wrapper.style.zIndex = 1;
-      }
-    });
-  }, []);
+    const scaleX = itemW / W;
+    const scaleY = itemH / H;
+    const translateX = rawX - (W * (1 - scaleX)) / 2;
+    const translateY = centerY - (H * (1 - scaleY)) / 2;
+
+    if (animated && window.gsap) {
+      window.gsap.to(wrapper, {
+        x: translateX, y: translateY,
+        scaleX, scaleY,
+        opacity: 1, zIndex: 1,
+        duration: 0.5,
+        ease: 'power2.out',
+        overwrite: true,
+      });
+    } else {
+      wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
+      wrapper.style.opacity = 1;
+      wrapper.style.zIndex = 1;
+    }
+  });
+}, []);
 
   const getClosestIndex = useCallback((offset) => {
     const W = window.innerWidth;
