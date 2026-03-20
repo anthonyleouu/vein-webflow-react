@@ -515,27 +515,38 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const switchToGrid = useCallback(() => {
-    const s = stateRef.current;
-    if (!s.isListView || !window.gsap) return;
-    s.isListView = false;
+  const s = stateRef.current;
+  if (!s.isListView || !window.gsap) return;
+  s.isListView = false;
 
-    wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper) return;
-      const isActive = i === s.currentIndex;
-      window.gsap.to(wrapper, {
-        x: 0, y: 0, scaleX: 1, scaleY: 1,
-        opacity: isActive ? 1 : 0,
-        zIndex: isActive ? 1 : 0,
-        duration: 1.2, ease: 'power3.inOut', overwrite: true,
-        onComplete: () => {
-          if (!isActive) videoRefs.current[i]?.pause();
-        },
-      });
+  const activeIndex = s.currentIndex;
+
+  wrapperRefs.current.forEach((wrapper, i) => {
+    if (!wrapper) return;
+    const isActive = i === activeIndex;
+    window.gsap.to(wrapper, {
+      x: 0, y: 0, scaleX: 1, scaleY: 1,
+      opacity: isActive ? 1 : 0,
+      zIndex: isActive ? 1 : 0,
+      duration: 1.2, ease: 'power3.inOut', overwrite: true,
+      onComplete: () => {
+        if (!isActive) {
+          videoRefs.current[i]?.pause();
+        } else {
+          // Ensure active video is playing and texture is loaded
+          const video = videoRefs.current[activeIndex];
+          if (video) {
+            video.play().catch(() => {});
+            threeRef.current.loadTexture?.(activeIndex);
+          }
+        }
+      },
     });
+  });
 
-    const canvas = document.querySelector('.work-canvas');
-    if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
-  }, []);
+  const canvas = document.querySelector('.work-canvas');
+  if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
+}, []);
 
   useEffect(() => {
     if (!items.length) return;
@@ -553,7 +564,7 @@ export default function WorkGrid({ onSwitchToList }) {
   const bandW = total * step;
 
   // Add momentum — larger delta = bigger throw
-  const momentum = e.deltaY * 2.5;
+  const momentum = e.deltaY * 4;
   const targetOffset = listOffsetRef.current + momentum;
 
   // Animate to target with ease out — feels like a throw
