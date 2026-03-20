@@ -141,7 +141,8 @@ export default function WorkGrid({ onSwitchToList }) {
     items.forEach((item, i) => {
       const wrapper = document.createElement('a');
       wrapper.className = 'grid-video-item';
-      wrapper.href = `/work/${item.slug}`;
+      wrapper.href = 'javascript:void(0)';
+      wrapper.dataset.slug = item.slug;
       wrapper.style.opacity = i === 0 ? '1' : '0';
       wrapper.style.zIndex = i === 0 ? '1' : '0';
 
@@ -690,10 +691,11 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!stack) return;
 
     const handleClick = (e) => {
-      e.preventDefault();
-      if (s.transitioning) return;
-      const item = itemsRef.current[s.currentIndex];
-      if (!item?.slug) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (s.transitioning) return;
+        const item = itemsRef.current[s.currentIndex];
+        if (!item?.slug) return;
 
       const W = window.innerWidth;
       const H = window.innerHeight;
