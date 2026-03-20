@@ -521,27 +521,36 @@ export default function WorkGrid({ onSwitchToList }) {
 
   const activeIndex = s.currentIndex;
 
+  // First — instantly hide all non-active, reset their transform
   wrapperRefs.current.forEach((wrapper, i) => {
-    if (!wrapper) return;
-    const isActive = i === activeIndex;
-    window.gsap.to(wrapper, {
+    if (!wrapper || i === activeIndex) return;
+    window.gsap.killTweensOf(wrapper);
+    window.gsap.set(wrapper, { opacity: 0, zIndex: 0 });
+    videoRefs.current[i]?.pause();
+  });
+
+  // Then — animate only the active one back to fullscreen
+  const activeWrapper = wrapperRefs.current[activeIndex];
+  if (activeWrapper) {
+    window.gsap.killTweensOf(activeWrapper);
+    window.gsap.to(activeWrapper, {
       x: 0, y: 0, scaleX: 1, scaleY: 1,
-      opacity: isActive ? 1 : 0,
-      zIndex: isActive ? 2 : 0,
+      opacity: 1, zIndex: 10,
       duration: 1.2, ease: 'power3.inOut', overwrite: true,
       onComplete: () => {
-        if (!isActive) {
-          videoRefs.current[i]?.pause();
-        } else {
-          const video = videoRefs.current[activeIndex];
-          if (video) {
-            video.play().catch(() => {});
-            threeRef.current.loadTexture?.(activeIndex);
-          }
+        const video = videoRefs.current[activeIndex];
+        if (video) {
+          video.play().catch(() => {});
+          threeRef.current.loadTexture?.(activeIndex);
         }
+        // Reset other wrappers transform after transition
+        wrapperRefs.current.forEach((wrapper, i) => {
+          if (!wrapper || i === activeIndex) return;
+          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, zIndex: 0 });
+        });
       },
     });
-  });
+  }
 
   const canvas = document.querySelector('.work-canvas');
   if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
