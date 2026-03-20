@@ -722,14 +722,14 @@ export default function WorkGrid({ onSwitchToList }) {
       x, y, scaleX, scaleY,
       duration: 1.0, ease: 'power3.inOut',
       onComplete: () => {
-        setTimeout(() => {
-          if (typeof barba !== 'undefined') {
-            barba.go(`/work/${item.slug}`);
-          } else {
-            window.location.href = `/work/${item.slug}`;
-          }
-        }, 50);
-      },
+  setTimeout(() => {
+    if (typeof barba !== 'undefined') {
+      barba.go(`/work/${item.slug}`);
+    } else {
+      window.location.href = `/work/${item.slug}`;
+    }
+  }, 50);
+},
     });
   } else {
     if (typeof barba !== 'undefined') {
