@@ -28,16 +28,10 @@ export default async function handler(req, res) {
     const items = itemData.items.map(item => {
       const rawUrl = item.fieldData['cover-video-url'] || null;
 
-      // Convert any Cloudflare Stream URL format to HLS manifest
       let videoUrl = rawUrl;
       if (rawUrl && rawUrl.includes('cloudflarestream.com')) {
-        // Extract the video ID from any Cloudflare Stream URL format:
-        // downloads/default.mp4  →  manifest/video.m3u8
-        // Already an .m3u8       →  keep as-is
         if (!rawUrl.includes('.m3u8')) {
-          const match = rawUrl.match(
-            /cloudflarestream\.com\/([a-f0-9]+)\//
-          );
+          const match = rawUrl.match(/cloudflarestream\.com\/([a-f0-9]+)\//);
           if (match) {
             const videoId = match[1];
             const customer = rawUrl.match(
@@ -50,6 +44,12 @@ export default async function handler(req, res) {
         }
       }
 
+      // Parse gallery — Webflow multi-image field
+      const galleryRaw = item.fieldData['gallery'] || [];
+      const gallery = Array.isArray(galleryRaw)
+        ? galleryRaw.map(img => img.url || img.fileUrl || null).filter(Boolean)
+        : [];
+
       return {
         id: item.id,
         name: item.fieldData.name,
@@ -60,6 +60,7 @@ export default async function handler(req, res) {
         client: item.fieldData['client'] || null,
         description: item.fieldData['description'] || null,
         website: item.fieldData['website'] || null,
+        gallery,
       };
     });
 
