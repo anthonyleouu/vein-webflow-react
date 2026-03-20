@@ -684,18 +684,27 @@ export default function WorkGrid({ onSwitchToList }) {
   }, [switchToGrid, switchToList, onSwitchToList]);
 
   useEffect(() => {
-    if (!items.length) return;
-    const s = stateRef.current;
-    const stack = document.querySelector('.video-stack');
-    if (!stack) return;
-    const handleClick = () => {
-      if (s.transitioning) return;
-      const item = itemsRef.current[s.currentIndex];
-      if (item) window.dispatchEvent(new CustomEvent('work:open', { detail: item }));
-    };
-    stack.addEventListener('click', handleClick);
-    return () => stack.removeEventListener('click', handleClick);
-  }, [items]);
+  if (!items.length) return;
+  const s = stateRef.current;
+  const stack = document.querySelector('.video-stack');
+  if (!stack) return;
+
+  const handleClick = () => {
+    if (s.transitioning) return;
+    const item = itemsRef.current[s.currentIndex];
+    if (item?.slug) {
+      // Navigate via Barba.js to the project CMS page
+      if (typeof barba !== 'undefined') {
+        barba.go(`/work/${item.slug}`);
+      } else {
+        window.location.href = `/work/${item.slug}`;
+      }
+    }
+  };
+
+  stack.addEventListener('click', handleClick);
+  return () => stack.removeEventListener('click', handleClick);
+}, [items]);
 
   return null;
 }

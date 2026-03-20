@@ -3,7 +3,7 @@ import GridDistortion from './GridDistortion/GridDistortion';
 import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
 import WorkGrid from './WorkGrid/WorkGrid';
 
-const mountAll = () => {
+window.mountAll = function mountAll() {
   // Mount GridDistortion
   const gridContainer = document.getElementById('grid-distortion-root');
   if (gridContainer && !gridContainer._mounted) {
