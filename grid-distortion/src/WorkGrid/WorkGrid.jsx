@@ -690,50 +690,55 @@ export default function WorkGrid({ onSwitchToList }) {
     if (!stack) return;
 
     const handleClick = (e) => {
-      e.preventDefault();
-      if (s.transitioning) return;
-      const item = itemsRef.current[s.currentIndex];
-      if (!item?.slug) return;
+  e.preventDefault();
+  if (s.transitioning) return;
+  const item = itemsRef.current[s.currentIndex];
+  if (!item?.slug) return;
 
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      const targetW = W * 0.52;
-      const targetH = H * 0.62;
-      const targetX = (W - targetW) / 2;
-      const targetY = (H - targetH) / 2;
-      const scaleX = targetW / W;
-      const scaleY = targetH / H;
-      const x = targetX - (W * (1 - scaleX)) / 2;
-      const y = targetY - (H * (1 - scaleY)) / 2;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const targetW = W * 0.52;
+  const targetH = H * 0.62;
+  const targetX = (W - targetW) / 2;
+  const targetY = (H - targetH) / 2;
+  const scaleX = targetW / W;
+  const scaleY = targetH / H;
+  const x = targetX - (W * (1 - scaleX)) / 2;
+  const y = targetY - (H * (1 - scaleY)) / 2;
 
-      const activeWrapper = wrapperRefs.current[s.currentIndex];
+  const activeWrapper = wrapperRefs.current[s.currentIndex];
 
-      // Hide all other videos instantly
-      wrapperRefs.current.forEach((wrapper, i) => {
-        if (!wrapper || i === s.currentIndex) return;
-        window.gsap?.set(wrapper, { opacity: 0 });
-      });
+  wrapperRefs.current.forEach((wrapper, i) => {
+    if (!wrapper || i === s.currentIndex) return;
+    window.gsap?.set(wrapper, { opacity: 0 });
+  });
 
-      // Hide UI
-      window.gsap?.to(['.work-canvas', '.btn-grid', '.btn-list', '.title-name', '.work-counter'], {
-        opacity: 0, duration: 0.3,
-      });
+  window.gsap?.to(['.work-canvas', '.btn-grid', '.btn-list', '.title-name', '.work-counter'], {
+    opacity: 0, duration: 0.3,
+  });
 
-      // Scale video to center then navigate
-      if (activeWrapper && window.gsap) {
-        window.gsap.to(activeWrapper, {
-          x, y, scaleX, scaleY,
-          duration: 1.0, ease: 'power3.inOut',
-          onComplete: () => {
-            setTimeout(() => {
-              window.location.href = `/work/${item.slug}`;
-            }, 50);
-          },
-        });
-      } else {
-        window.location.href = `/work/${item.slug}`;
-      }
-    };
+  if (activeWrapper && window.gsap) {
+    window.gsap.to(activeWrapper, {
+      x, y, scaleX, scaleY,
+      duration: 1.0, ease: 'power3.inOut',
+      onComplete: () => {
+        setTimeout(() => {
+          if (typeof barba !== 'undefined') {
+            barba.go(`/work/${item.slug}`);
+          } else {
+            window.location.href = `/work/${item.slug}`;
+          }
+        }, 50);
+      },
+    });
+  } else {
+    if (typeof barba !== 'undefined') {
+      barba.go(`/work/${item.slug}`);
+    } else {
+      window.location.href = `/work/${item.slug}`;
+    }
+  }
+};
 
     stack.addEventListener('click', handleClick);
     return () => stack.removeEventListener('click', handleClick);
