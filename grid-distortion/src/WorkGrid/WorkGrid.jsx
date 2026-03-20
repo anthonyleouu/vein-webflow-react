@@ -527,7 +527,7 @@ export default function WorkGrid({ onSwitchToList }) {
     window.gsap.to(wrapper, {
       x: 0, y: 0, scaleX: 1, scaleY: 1,
       opacity: isActive ? 1 : 0,
-      zIndex: isActive ? 1 : 0,
+      zIndex: isActive ? 2 : 0,
       duration: 1.2, ease: 'power3.inOut', overwrite: true,
       onComplete: () => {
         if (!isActive) {

@@ -78,6 +78,7 @@ export default function ArchiveCanvas() {
 
       const cursorInner = document.getElementById('archive-cursor-inner');
       if (cursorInner) cursorInner.style.opacity = '1';
+
       s.animating = true;
       s.targetX = s.originX;
       s.targetY = s.originY;
@@ -209,7 +210,7 @@ export default function ArchiveCanvas() {
         ctx.clip();
         ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
         ctx.restore();
-      return;
+        return;
       }
 
       offscreen.width = dw;
@@ -241,18 +242,16 @@ export default function ArchiveCanvas() {
       const sx = -(sw - dw) / 2;
       const sy = -(sh - dh) / 2;
 
-      // Before settled or on mobile — draw normally
       if (!s.activeBlockSettled || window.innerWidth < 1024) {
         ctx.save();
         ctx.beginPath();
-        ctx.rect(dx, dy, dw, dh);
+        ctx.roundRect(dx, dy, dw, dh, 2);
         ctx.clip();
         ctx.drawImage(img, dx + sx, dy + sy, sw, sh);
         ctx.restore();
         return;
       }
 
-      // Update grid distortion data
       const d = s.gridData;
       const mouse = 0.1;
       const strength = 0.15;
@@ -281,7 +280,6 @@ export default function ArchiveCanvas() {
         }
       }
 
-      // Draw with smooth strip distortion
       offscreen.width = dw;
       offscreen.height = dh;
       offCtx.clearRect(0, 0, dw, dh);
@@ -289,31 +287,29 @@ export default function ArchiveCanvas() {
 
       ctx.save();
       ctx.beginPath();
-      ctx.rect(dx, dy, dw, dh);
+      ctx.roundRect(dx, dy, dw, dh, 2);
       ctx.clip();
 
       const strips = 60;
       const stripH = dh / strips;
 
       for (let i = 0; i < strips; i++) {
-  const sy2 = i * stripH;
-  // Sample the full grid row and average the X offset across all columns
-  const gridRow = Math.floor((i / strips) * GRID);
-  let avgWaveX = 0;
-  for (let gc = 0; gc < GRID; gc++) {
-    const index = 4 * (gc + GRID * gridRow);
-    avgWaveX += d[index];
-  }
-  avgWaveX = (avgWaveX / GRID) * dw * 0.02;
-  ctx.drawImage(
-    offscreen,
-    0, sy2, dw, stripH + 1,
-    dx + avgWaveX, dy + sy2, dw, stripH + 1
-  );
-}
+        const sy2 = i * stripH;
+        const gridRow = Math.floor((i / strips) * GRID);
+        let avgWaveX = 0;
+        for (let gc = 0; gc < GRID; gc++) {
+          const index = 4 * (gc + GRID * gridRow);
+          avgWaveX += d[index];
+        }
+        avgWaveX = (avgWaveX / GRID) * dw * 0.02;
+        ctx.drawImage(
+          offscreen,
+          0, sy2, dw, stripH + 1,
+          dx + avgWaveX, dy + sy2, dw, stripH + 1
+        );
+      }
 
       ctx.restore();
-
       s.mouseVX *= 0.85;
       s.mouseVY *= 0.85;
     };
@@ -373,7 +369,6 @@ export default function ArchiveCanvas() {
         }
       }
 
-      // Animate and draw active block on top — pure canvas, zero flash
       if (s.activeBlockAnimating && s.activeBlockImg) {
         s.activeBlockX += (s.activeBlockTargetX - s.activeBlockX) * EASE;
         s.activeBlockY += (s.activeBlockTargetY - s.activeBlockY) * EASE;
@@ -426,13 +421,6 @@ export default function ArchiveCanvas() {
       if (s._locked) return;
       const pos = getPos(e);
 
-      const cursorEl = document.querySelector('.archive-cursor-label');
-      const cursor = document.querySelector('.archive-cursor');
-      if (cursor) {
-        cursor.style.left = pos.x + 'px';
-        cursor.style.top = pos.y + 'px';
-      }
-
       if (s.dragging) {
         s.vx = pos.x - s.lastX;
         s.vy = pos.y - s.lastY;
@@ -466,14 +454,14 @@ export default function ArchiveCanvas() {
         }
 
         if (found) {
-  s.hoveredSlug = found.slug;
-  s.hoveredCol = foundCol;
-  s.hoveredRow = foundRow;
-} else {
-  s.hoveredSlug = null;
-  s.hoveredCol = null;
-  s.hoveredRow = null;
-}
+          s.hoveredSlug = found.slug;
+          s.hoveredCol = foundCol;
+          s.hoveredRow = foundRow;
+        } else {
+          s.hoveredSlug = null;
+          s.hoveredCol = null;
+          s.hoveredRow = null;
+        }
       }
     };
 
@@ -489,6 +477,7 @@ export default function ArchiveCanvas() {
 
         const cursorInner = document.getElementById('archive-cursor-inner');
         if (cursorInner) cursorInner.style.opacity = '0';
+
         s._locked = true;
         s.activeCol = s.hoveredCol;
         s.activeRow = s.hoveredRow;
@@ -581,9 +570,6 @@ export default function ArchiveCanvas() {
         exponential
         opacity={1}
       />
-      <div className="archive-cursor">
-        <div className="archive-cursor-label">DRAG OR CLICK</div>
-      </div>
     </div>
   );
 }
