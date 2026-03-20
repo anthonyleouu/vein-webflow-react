@@ -442,21 +442,39 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const snapToClosest = useCallback(() => {
-    const W = window.innerWidth;
-    const itemW = W * LIST_ITEM_W;
-    const step = itemW + LIST_GAP;
-    const s = stateRef.current;
-    const closest = getClosestIndex(listOffsetRef.current);
-    s.currentIndex = closest;
-    updateUI(itemsRef.current[closest], closest);
-    if (window.gsap) {
-      window.gsap.to(listOffsetRef, {
-        current: closest * step,
-        duration: 0.6, ease: 'power3.out',
-        onUpdate: () => applyListPositions(listOffsetRef.current),
-      });
-    }
-  }, [getClosestIndex, updateUI, applyListPositions]);
+  const W = window.innerWidth;
+  const itemW = W * LIST_ITEM_W;
+  const step = itemW + LIST_GAP;
+  const total = itemsRef.current.length;
+  const bandW = total * step;
+  const s = stateRef.current;
+
+  const closest = getClosestIndex(listOffsetRef.current);
+  s.currentIndex = closest;
+  updateUI(itemsRef.current[closest], closest);
+
+  // Target offset normalized within band
+  let targetOffset = closest * step;
+  // Find the nearest equivalent of targetOffset to current offset
+  const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
+  const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
+  targetOffset = listOffsetRef.current + shortDiff;
+
+  if (window.gsap) {
+    window.gsap.to(listOffsetRef, {
+      current: targetOffset,
+      duration: 0.6, ease: 'power3.out',
+      onUpdate: () => {
+        // Normalize during animation too
+        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        applyListPositions(listOffsetRef.current);
+      },
+      onComplete: () => {
+        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+      }
+    });
+  }
+}, [getClosestIndex, updateUI, applyListPositions]);
 
   const switchToList = useCallback(() => {
     const s = stateRef.current;
@@ -528,12 +546,22 @@ export default function WorkGrid({ onSwitchToList }) {
       e.stopPropagation();
 
       if (s.isListView) {
-        listOffsetRef.current += e.deltaY * 0.8;
-        applyListPositions(listOffsetRef.current);
-        clearTimeout(listSnapTimerRef.current);
-        listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
-        return;
-      }
+  const W = window.innerWidth;
+  const itemW = W * LIST_ITEM_W;
+  const step = itemW + LIST_GAP;
+  const total = itemsRef.current.length;
+  const bandW = total * step;
+
+  listOffsetRef.current += e.deltaY * 0.8;
+
+  // Normalize offset to prevent it growing unboundedly
+  listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+
+  applyListPositions(listOffsetRef.current);
+  clearTimeout(listSnapTimerRef.current);
+  listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
+  return;
+}
 
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
