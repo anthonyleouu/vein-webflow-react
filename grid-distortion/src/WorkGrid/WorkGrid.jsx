@@ -76,7 +76,6 @@ export default function WorkGrid({ onSwitchToList }) {
         width: 100%;
         height: 100%;
         overflow: hidden;
-        transition: opacity 0.8s ease;
       }
       .grid-video-item video {
         position: absolute;
@@ -355,27 +354,22 @@ export default function WorkGrid({ onSwitchToList }) {
 
     setTimeout(() => {
       videoRefs.current[s.currentIndex]?.pause();
-
       if (nextWrapper) {
         nextWrapper.style.zIndex = '1';
         nextWrapper.style.opacity = '1';
       }
-
       const nextVideo = videoRefs.current[wrapped];
       if (nextVideo) {
         nextVideo.play().catch(() => {});
         three.loadTexture?.(wrapped);
       }
-
       s.currentIndex = wrapped;
       updateUI(allItems[wrapped], wrapped);
-
       const nextIdx = ((wrapped + 1) % total + total) % total;
       const preloadVid = videoRefs.current[nextIdx];
       if (preloadVid && !preloadVid.src) {
         preloadVid.src = allItems[nextIdx].videoUrl;
       }
-
       setTimeout(() => { s.transitioning = false; }, 600);
     }, 400);
   }, [updateUI]);
@@ -398,21 +392,17 @@ export default function WorkGrid({ onSwitchToList }) {
       const wrappedRel = ((relativeToCentre % bandW) + bandW) % bandW;
       const finalRelative = wrappedRel > bandW / 2 ? wrappedRel - bandW : wrappedRel;
       rawX = centerX + finalRelative;
-
       const scaleX = itemW / W;
       const scaleY = itemH / H;
       const translateX = rawX - (W * (1 - scaleX)) / 2;
       const translateY = centerY - (H * (1 - scaleY)) / 2;
 
       if (animated && window.gsap) {
-        const isActive = i === s.currentIndex;
-window.gsap.to(wrapper, {
-  x: translateX, y: translateY, scaleX, scaleY,
-  opacity: 1, zIndex: 1,
-  duration: isActive ? 1.8 : 1.2,
-  delay: isActive ? 0 : 0.6,
-  ease: 'power3.inOut', overwrite: true,
-});
+        window.gsap.to(wrapper, {
+          x: translateX, y: translateY, scaleX, scaleY,
+          opacity: 1, zIndex: 1, duration: 0.5,
+          ease: 'power2.out', overwrite: true,
+        });
       } else {
         wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
         wrapper.style.opacity = '1';
@@ -428,10 +418,8 @@ window.gsap.to(wrapper, {
     const total = itemsRef.current.length;
     const bandW = total * step;
     const centerX = (W - itemW) / 2;
-
     let closest = 0;
     let minDist = Infinity;
-
     for (let i = 0; i < total; i++) {
       let rawX = centerX + (i * step) - offset;
       const rel = rawX - centerX;
@@ -445,117 +433,111 @@ window.gsap.to(wrapper, {
   }, []);
 
   const snapToClosest = useCallback(() => {
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  const itemW = W * LIST_ITEM_W;
-  const itemH = H * LIST_ITEM_H;
-  const step = itemW + LIST_GAP;
-  const total = itemsRef.current.length;
-  const bandW = total * step;
-  const s = stateRef.current;
-  const prevIndex = s.currentIndex;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const itemW = W * LIST_ITEM_W;
+    const itemH = H * LIST_ITEM_H;
+    const step = itemW + LIST_GAP;
+    const total = itemsRef.current.length;
+    const bandW = total * step;
+    const s = stateRef.current;
+    const prevIndex = s.currentIndex;
 
-  const closest = getClosestIndex(listOffsetRef.current);
-  s.currentIndex = closest;
-  updateUI(itemsRef.current[closest], closest);
+    const closest = getClosestIndex(listOffsetRef.current);
+    s.currentIndex = closest;
+    updateUI(itemsRef.current[closest], closest);
 
-  // If active changed, ensure previous active is properly positioned in list
-  if (prevIndex !== closest) {
-    const prevWrapper = wrapperRefs.current[prevIndex];
-    if (prevWrapper && window.gsap) {
-      const centerX = (W - itemW) / 2;
-      const centerY = (H - itemH) / 2;
-      let offset = prevIndex - closest;
+    // When active changes, move previous active to its list position
+    if (prevIndex !== closest) {
+      const prevWrapper = wrapperRefs.current[prevIndex];
+      if (prevWrapper && window.gsap) {
+        const centerX = (W - itemW) / 2;
+        const centerY = (H - itemH) / 2;
+        let offset = prevIndex - closest;
+        if (offset > total / 2) offset -= total;
+        if (offset < -total / 2) offset += total;
+        const rawX = centerX + offset * step;
+        const scaleX = itemW / W;
+        const scaleY = itemH / H;
+        const translateX = rawX - (W * (1 - scaleX)) / 2;
+        const translateY = centerY - (H * (1 - scaleY)) / 2;
+        window.gsap.set(prevWrapper, {
+          x: translateX, y: translateY,
+          scaleX, scaleY, opacity: 1, zIndex: 1,
+        });
+      }
+    }
+
+    let targetOffset = closest * step;
+    const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
+    const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
+    targetOffset = listOffsetRef.current + shortDiff;
+
+    if (window.gsap) {
+      window.gsap.to(listOffsetRef, {
+        current: targetOffset,
+        duration: 0.6, ease: 'power3.out',
+        onUpdate: () => {
+          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+          applyListPositions(listOffsetRef.current);
+        },
+        onComplete: () => {
+          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        }
+      });
+    }
+  }, [getClosestIndex, updateUI, applyListPositions]);
+
+  const switchToList = useCallback(() => {
+    const s = stateRef.current;
+    if (s.isListView || !window.gsap) return;
+    s.isListView = true;
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const itemW = W * LIST_ITEM_W;
+    const itemH = H * LIST_ITEM_H;
+    const step = itemW + LIST_GAP;
+    const centerX = (W - itemW) / 2;
+    const centerY = (H - itemH) / 2;
+    const total = wrapperRefs.current.length;
+
+    listOffsetRef.current = s.currentIndex * step;
+    videoRefs.current.forEach(v => v?.play().catch(() => {}));
+
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper) return;
+      const isActive = i === s.currentIndex;
+      const scaleX = itemW / W;
+      const scaleY = itemH / H;
+      let offset = i - s.currentIndex;
       if (offset > total / 2) offset -= total;
       if (offset < -total / 2) offset += total;
       const rawX = centerX + offset * step;
-      const scaleX = itemW / W;
-      const scaleY = itemH / H;
       const translateX = rawX - (W * (1 - scaleX)) / 2;
       const translateY = centerY - (H * (1 - scaleY)) / 2;
-      window.gsap.set(prevWrapper, {
-        x: translateX, y: translateY,
-        scaleX, scaleY,
-        opacity: 1, zIndex: 1,
-      });
-    }
-  }
 
-  let targetOffset = closest * step;
-  const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
-  const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
-  targetOffset = listOffsetRef.current + shortDiff;
-
-  if (window.gsap) {
-    window.gsap.to(listOffsetRef, {
-      current: targetOffset,
-      duration: 0.6, ease: 'power3.out',
-      onUpdate: () => {
-        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-        applyListPositions(listOffsetRef.current);
-      },
-      onComplete: () => {
-        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+      if (isActive) {
+        window.gsap.to(wrapper, {
+          x: translateX, y: translateY, scaleX, scaleY,
+          opacity: 1, zIndex: 2, duration: 1.8,
+          ease: 'power3.inOut', overwrite: true,
+        });
+      } else {
+        // Instantly place at list position, then fade in
+        window.gsap.set(wrapper, {
+          x: translateX, y: translateY, scaleX, scaleY, zIndex: 1,
+        });
+        window.gsap.to(wrapper, {
+          opacity: 1, duration: 0.8, delay: 0.6,
+          ease: 'power2.out', overwrite: true,
+        });
       }
     });
-  }
-}, [getClosestIndex, updateUI, applyListPositions]);
 
-  const switchToList = useCallback(() => {
-  const s = stateRef.current;
-  if (s.isListView || !window.gsap) return;
-  s.isListView = true;
-
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  const itemW = W * LIST_ITEM_W;
-  const itemH = H * LIST_ITEM_H;
-  const step = itemW + LIST_GAP;
-  const centerX = (W - itemW) / 2;
-  const centerY = (H - itemH) / 2;
-  const total = wrapperRefs.current.length;
-
-  listOffsetRef.current = s.currentIndex * step;
-  videoRefs.current.forEach(v => v?.play().catch(() => {}));
-
-  wrapperRefs.current.forEach((wrapper, i) => {
-    if (!wrapper) return;
-    const isActive = i === s.currentIndex;
-    const scaleX = itemW / W;
-    const scaleY = itemH / H;
-    let offset = i - s.currentIndex;
-    if (offset > total / 2) offset -= total;
-    if (offset < -total / 2) offset += total;
-    const rawX = centerX + offset * step;
-    const translateX = rawX - (W * (1 - scaleX)) / 2;
-    const translateY = centerY - (H * (1 - scaleY)) / 2;
-
-    if (isActive) {
-      // Active animates from fullscreen to list position
-      window.gsap.to(wrapper, {
-        x: translateX, y: translateY, scaleX, scaleY,
-        opacity: 1, zIndex: 2, duration: 1.8,
-        ease: 'power3.inOut', overwrite: true,
-      });
-    } else {
-      // Non-active: SET to their list position immediately, then fade in
-      window.gsap.set(wrapper, {
-        x: translateX, y: translateY, scaleX, scaleY,
-        zIndex: 1,
-      });
-      window.gsap.to(wrapper, {
-        opacity: 1,
-        duration: 0.8,
-        delay: 0.6,
-        ease: 'power2.out',
-        overwrite: true,
-      });
-    }
-  });
-
-  const canvas = document.querySelector('.work-canvas');
-  if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
-}, []);
+    const canvas = document.querySelector('.work-canvas');
+    if (canvas) window.gsap.to(canvas, { opacity: 0, duration: 0.5 });
+  }, []);
 
   const switchToGrid = useCallback(() => {
     const s = stateRef.current;
@@ -566,53 +548,53 @@ window.gsap.to(wrapper, {
     const W = window.innerWidth;
     const H = window.innerHeight;
 
-    // Instantly hide all non-active — they're already at opacity:0
-    // from the switchToList reset, so this is just a safety measure
+    // Kill all tweens and immediately hide EVERYTHING
     wrapperRefs.current.forEach((wrapper, i) => {
-      if (!wrapper || i === activeIndex) return;
+      if (!wrapper) return;
       window.gsap.killTweensOf(wrapper);
-      window.gsap.set(wrapper, { opacity: 0, zIndex: -1 });
-      videoRefs.current[i]?.pause();
+      window.gsap.set(wrapper, { opacity: 0, zIndex: 0 });
+      if (i !== activeIndex) videoRefs.current[i]?.pause();
     });
 
-    // Get active wrapper's current screen position
-    const activeWrapper = wrapperRefs.current[activeIndex];
-    if (!activeWrapper) return;
+    // Double rAF ensures browser paints opacity:0 before we show active
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const activeWrapper = wrapperRefs.current[activeIndex];
+        if (!activeWrapper) return;
 
-    window.gsap.killTweensOf(activeWrapper);
+        const rect = activeWrapper.getBoundingClientRect();
+        const scaleX = rect.width / W;
+        const scaleY = rect.height / H;
+        const x = rect.left - (W * (1 - scaleX)) / 2;
+        const y = rect.top - (H * (1 - scaleY)) / 2;
 
-    const rect = activeWrapper.getBoundingClientRect();
-    const scaleX = rect.width / W;
-    const scaleY = rect.height / H;
-    const x = rect.left - (W * (1 - scaleX)) / 2;
-    const y = rect.top - (H * (1 - scaleY)) / 2;
-
-    // Set to current position using transforms, then animate to fullscreen
-    window.gsap.set(activeWrapper, {
-      x, y, scaleX, scaleY,
-      opacity: 1, zIndex: 10,
-      transformOrigin: 'center center',
-    });
-
-    window.gsap.to(activeWrapper, {
-      x: 0, y: 0, scaleX: 1, scaleY: 1,
-      opacity: 1, zIndex: 10,
-      duration: 1.2, ease: 'power3.inOut',
-      onComplete: () => {
-        wrapperRefs.current.forEach((wrapper, i) => {
-          if (!wrapper || i === activeIndex) return;
-          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+        window.gsap.set(activeWrapper, {
+          x, y, scaleX, scaleY,
+          opacity: 1, zIndex: 10,
+          transformOrigin: 'center center',
         });
-        const video = videoRefs.current[activeIndex];
-        if (video) {
-          video.play().catch(() => {});
-          threeRef.current.loadTexture?.(activeIndex);
-        }
-      },
+
+        window.gsap.to(activeWrapper, {
+          x: 0, y: 0, scaleX: 1, scaleY: 1,
+          opacity: 1, zIndex: 10,
+          duration: 1.2, ease: 'power3.inOut',
+          onComplete: () => {
+            wrapperRefs.current.forEach((wrapper, i) => {
+              if (!wrapper || i === activeIndex) return;
+              window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+            });
+            const video = videoRefs.current[activeIndex];
+            if (video) {
+              video.play().catch(() => {});
+              threeRef.current.loadTexture?.(activeIndex);
+            }
+          },
+        });
+      });
     });
 
     const canvas = document.querySelector('.work-canvas');
-    if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
+    if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 1.4 });
   }, []);
 
   useEffect(() => {
@@ -629,7 +611,6 @@ window.gsap.to(wrapper, {
         const step = itemW + LIST_GAP;
         const total = itemsRef.current.length;
         const bandW = total * step;
-
         const momentum = e.deltaY * 4;
         const targetOffset = listOffsetRef.current + momentum;
 
@@ -637,9 +618,7 @@ window.gsap.to(wrapper, {
           window.gsap.killTweensOf(listOffsetRef);
           window.gsap.to(listOffsetRef, {
             current: targetOffset,
-            duration: 0.8,
-            ease: 'power3.out',
-            overwrite: true,
+            duration: 0.8, ease: 'power3.out', overwrite: true,
             onUpdate: () => {
               listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
               applyListPositions(listOffsetRef.current);
