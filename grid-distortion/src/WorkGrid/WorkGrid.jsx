@@ -520,8 +520,10 @@ export default function WorkGrid({ onSwitchToList }) {
   s.isListView = false;
 
   const activeIndex = s.currentIndex;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
 
-  // Instantly hide all non-active in their current positions
+  // Step 1 — instantly hide ALL non-active videos
   wrapperRefs.current.forEach((wrapper, i) => {
     if (!wrapper || i === activeIndex) return;
     window.gsap.killTweensOf(wrapper);
@@ -529,28 +531,45 @@ export default function WorkGrid({ onSwitchToList }) {
     videoRefs.current[i]?.pause();
   });
 
-  // Animate active back to fullscreen using scale/translate
+  // Step 2 — get active wrapper's current screen position
   const activeWrapper = wrapperRefs.current[activeIndex];
-  if (activeWrapper) {
-    window.gsap.killTweensOf(activeWrapper);
-    window.gsap.to(activeWrapper, {
-      x: 0, y: 0, scaleX: 1, scaleY: 1,
-      opacity: 1, zIndex: 10,
-      duration: 1.2, ease: 'power3.inOut', overwrite: true,
-      onComplete: () => {
-        // Reset other wrappers transforms after active is fullscreen
-        wrapperRefs.current.forEach((wrapper, i) => {
-          if (!wrapper || i === activeIndex) return;
-          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
-        });
-        const video = videoRefs.current[activeIndex];
-        if (video) {
-          video.play().catch(() => {});
-          threeRef.current.loadTexture?.(activeIndex);
-        }
-      },
-    });
-  }
+  if (!activeWrapper) return;
+
+  window.gsap.killTweensOf(activeWrapper);
+
+  const rect = activeWrapper.getBoundingClientRect();
+
+  // Convert screen rect to GSAP transform values
+  const scaleX = rect.width / W;
+  const scaleY = rect.height / H;
+  const x = rect.left - (W * (1 - scaleX)) / 2;
+  const y = rect.top - (H * (1 - scaleY)) / 2;
+
+  // Step 3 — set active to its exact current visual position using transforms
+  window.gsap.set(activeWrapper, {
+    x, y, scaleX, scaleY,
+    opacity: 1, zIndex: 10,
+    transformOrigin: 'center center',
+  });
+
+  // Step 4 — animate to fullscreen from that position
+  window.gsap.to(activeWrapper, {
+    x: 0, y: 0, scaleX: 1, scaleY: 1,
+    opacity: 1, zIndex: 10,
+    duration: 1.2, ease: 'power3.inOut',
+    onComplete: () => {
+      // Reset all other wrappers cleanly after transition
+      wrapperRefs.current.forEach((wrapper, i) => {
+        if (!wrapper || i === activeIndex) return;
+        window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+      });
+      const video = videoRefs.current[activeIndex];
+      if (video) {
+        video.play().catch(() => {});
+        threeRef.current.loadTexture?.(activeIndex);
+      }
+    },
+  });
 
   const canvas = document.querySelector('.work-canvas');
   if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
