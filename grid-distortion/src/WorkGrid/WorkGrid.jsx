@@ -256,32 +256,49 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const navigateTo = useCallback((newIndex) => {
-    const s = stateRef.current;
-    const allItems = itemsRef.current;
-    if (s.transitioning || !allItems.length || s.isListView) return;
-    s.transitioning = true;
+  const s = stateRef.current;
+  const allItems = itemsRef.current;
+  if (s.transitioning || !allItems.length || s.isListView) return;
+  s.transitioning = true;
 
-    const total = allItems.length;
-    const wrapped = ((newIndex % total) + total) % total;
+  const total = allItems.length;
+  const wrapped = ((newIndex % total) + total) % total;
 
-    blastExit();
+  blastExit();
 
-// Fade out current smoothly
-if (wrapperRefs.current[s.currentIndex]) {
-  wrapperRefs.current[s.currentIndex].style.opacity = 0;
-  wrapperRefs.current[s.currentIndex].style.zIndex = 0;
-}
-videoRefs.current[s.currentIndex]?.pause();
+  const currentWrapper = wrapperRefs.current[s.currentIndex];
+  const nextWrapper = wrapperRefs.current[wrapped];
 
-// Fade in next after current has faded out
-setTimeout(() => {
-  if (wrapperRefs.current[wrapped]) {
-    wrapperRefs.current[wrapped].style.zIndex = 1;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        wrapperRefs.current[wrapped].style.opacity = 1;
-      });
+  // Pre-position next video behind current
+  if (nextWrapper) {
+    nextWrapper.style.zIndex = 0;
+    nextWrapper.style.opacity = 0;
+  }
+
+  // Use GSAP for smooth cross-fade
+  if (window.gsap && currentWrapper && nextWrapper) {
+    window.gsap.to(currentWrapper, {
+      opacity: 0,
+      duration: 0.8,
+      ease: 'power2.inOut',
+      onComplete: () => {
+        currentWrapper.style.zIndex = 0;
+        videoRefs.current[s.currentIndex]?.pause();
+      },
     });
+
+    // Slight delay so fade-out starts before fade-in
+    window.gsap.to(nextWrapper, {
+      opacity: 1,
+      duration: 0.8,
+      delay: 0.3,
+      ease: 'power2.inOut',
+      onStart: () => { nextWrapper.style.zIndex = 1; },
+    });
+  } else {
+    // Fallback
+    if (currentWrapper) { currentWrapper.style.opacity = 0; currentWrapper.style.zIndex = 0; }
+    if (nextWrapper) { nextWrapper.style.opacity = 1; nextWrapper.style.zIndex = 1; }
   }
 
   s.currentIndex = wrapped;
@@ -291,9 +308,8 @@ setTimeout(() => {
   const nextIdx = ((wrapped + 1) % total + total) % total;
   preloadVideo(nextIdx);
 
-  setTimeout(() => { s.transitioning = false; }, 800);
-}, 500);
-  }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
+  setTimeout(() => { s.transitioning = false; }, 1100);
+}, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
 
   const applyListPositions = useCallback((offset, animated = false) => {
   const W = window.innerWidth;
