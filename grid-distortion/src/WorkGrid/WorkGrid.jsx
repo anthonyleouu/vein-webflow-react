@@ -521,11 +521,11 @@ export default function WorkGrid({ onSwitchToList }) {
 
   const activeIndex = s.currentIndex;
 
-  // Instantly hide all non-active and reset their transforms
+  // Instantly hide all non-active — keep their current transform, just hide them
   wrapperRefs.current.forEach((wrapper, i) => {
     if (!wrapper || i === activeIndex) return;
     window.gsap.killTweensOf(wrapper);
-    window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+    window.gsap.set(wrapper, { opacity: 0, zIndex: 0 });
     videoRefs.current[i]?.pause();
   });
 
@@ -534,30 +534,16 @@ export default function WorkGrid({ onSwitchToList }) {
   if (activeWrapper) {
     window.gsap.killTweensOf(activeWrapper);
 
-    // Get current visual position on screen
     const rect = activeWrapper.getBoundingClientRect();
     const W = window.innerWidth;
     const H = window.innerHeight;
 
-    // Calculate where it currently is relative to fullscreen position
-    const currentX = rect.left;
-    const currentY = rect.top;
-    const currentW = rect.width;
-    const currentH = rect.height;
-
-    // Reset transform, position it visually where it currently appears
-    window.gsap.set(activeWrapper, {
-      x: 0, y: 0, scaleX: 1, scaleY: 1,
-      transformOrigin: 'top left',
-    });
-
-    // Use clip/position trick — animate from current rect to full screen
     window.gsap.fromTo(activeWrapper,
       {
-        x: currentX,
-        y: currentY,
-        width: currentW,
-        height: currentH,
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
         scaleX: 1,
         scaleY: 1,
         opacity: 1,
@@ -576,10 +562,14 @@ export default function WorkGrid({ onSwitchToList }) {
         ease: 'power3.inOut',
         overwrite: true,
         onComplete: () => {
-          // Clean up inline width/height after animation
           window.gsap.set(activeWrapper, {
             x: 0, y: 0, width: '', height: '',
             transformOrigin: 'center center',
+          });
+          // Now reset all other wrappers cleanly
+          wrapperRefs.current.forEach((wrapper, i) => {
+            if (!wrapper || i === activeIndex) return;
+            window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
           });
           const video = videoRefs.current[activeIndex];
           if (video) {
