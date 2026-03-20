@@ -524,32 +524,23 @@ export default function WorkGrid({ onSwitchToList }) {
   wrapperRefs.current.forEach((wrapper, i) => {
     if (!wrapper) return;
     const isActive = i === activeIndex;
-
-    if (!isActive) {
-      // Instantly hide all non-active videos
-      window.gsap.to(wrapper, {
-        opacity: 0, zIndex: 0,
-        duration: 0.3, ease: 'power2.in', overwrite: true,
-        onComplete: () => {
-          // Reset transform after fade out
-          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1 });
+    window.gsap.to(wrapper, {
+      x: 0, y: 0, scaleX: 1, scaleY: 1,
+      opacity: isActive ? 1 : 0,
+      zIndex: isActive ? 1 : 0,
+      duration: 1.2, ease: 'power3.inOut', overwrite: true,
+      onComplete: () => {
+        if (!isActive) {
           videoRefs.current[i]?.pause();
-        },
-      });
-    } else {
-      // Active video transitions back to fullscreen
-      window.gsap.to(wrapper, {
-        x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1, zIndex: 1,
-        duration: 1.2, ease: 'power3.inOut', overwrite: true,
-        onComplete: () => {
+        } else {
           const video = videoRefs.current[activeIndex];
           if (video) {
             video.play().catch(() => {});
             threeRef.current.loadTexture?.(activeIndex);
           }
-        },
-      });
-    }
+        }
+      },
+    });
   });
 
   const canvas = document.querySelector('.work-canvas');
