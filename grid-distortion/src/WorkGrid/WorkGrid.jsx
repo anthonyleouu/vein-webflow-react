@@ -521,35 +521,74 @@ export default function WorkGrid({ onSwitchToList }) {
 
   const activeIndex = s.currentIndex;
 
-  // First — instantly hide all non-active, reset their transform
+  // Instantly hide all non-active and reset their transforms
   wrapperRefs.current.forEach((wrapper, i) => {
     if (!wrapper || i === activeIndex) return;
     window.gsap.killTweensOf(wrapper);
-    window.gsap.set(wrapper, { opacity: 0, zIndex: 0 });
+    window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
     videoRefs.current[i]?.pause();
   });
 
-  // Then — animate only the active one back to fullscreen
+  // Animate active from its current visual position to fullscreen
   const activeWrapper = wrapperRefs.current[activeIndex];
   if (activeWrapper) {
     window.gsap.killTweensOf(activeWrapper);
-    window.gsap.to(activeWrapper, {
+
+    // Get current visual position on screen
+    const rect = activeWrapper.getBoundingClientRect();
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+
+    // Calculate where it currently is relative to fullscreen position
+    const currentX = rect.left;
+    const currentY = rect.top;
+    const currentW = rect.width;
+    const currentH = rect.height;
+
+    // Reset transform, position it visually where it currently appears
+    window.gsap.set(activeWrapper, {
       x: 0, y: 0, scaleX: 1, scaleY: 1,
-      opacity: 1, zIndex: 10,
-      duration: 1.2, ease: 'power3.inOut', overwrite: true,
-      onComplete: () => {
-        const video = videoRefs.current[activeIndex];
-        if (video) {
-          video.play().catch(() => {});
-          threeRef.current.loadTexture?.(activeIndex);
-        }
-        // Reset other wrappers transform after transition
-        wrapperRefs.current.forEach((wrapper, i) => {
-          if (!wrapper || i === activeIndex) return;
-          window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, zIndex: 0 });
-        });
-      },
+      transformOrigin: 'top left',
     });
+
+    // Use clip/position trick — animate from current rect to full screen
+    window.gsap.fromTo(activeWrapper,
+      {
+        x: currentX,
+        y: currentY,
+        width: currentW,
+        height: currentH,
+        scaleX: 1,
+        scaleY: 1,
+        opacity: 1,
+        zIndex: 10,
+      },
+      {
+        x: 0,
+        y: 0,
+        width: W,
+        height: H,
+        scaleX: 1,
+        scaleY: 1,
+        opacity: 1,
+        zIndex: 10,
+        duration: 1.2,
+        ease: 'power3.inOut',
+        overwrite: true,
+        onComplete: () => {
+          // Clean up inline width/height after animation
+          window.gsap.set(activeWrapper, {
+            x: 0, y: 0, width: '', height: '',
+            transformOrigin: 'center center',
+          });
+          const video = videoRefs.current[activeIndex];
+          if (video) {
+            video.play().catch(() => {});
+            threeRef.current.loadTexture?.(activeIndex);
+          }
+        },
+      }
+    );
   }
 
   const canvas = document.querySelector('.work-canvas');
