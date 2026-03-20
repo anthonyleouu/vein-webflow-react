@@ -206,10 +206,7 @@ export default function WorkGrid({ onSwitchToList }) {
     // Initialize data texture with random values — creates the load animation
     const size = GRID;
     const data = new Float32Array(4 * size * size);
-    for (let i = 0; i < size * size; i++) {
-      data[i * 4] = Math.random() * 255 - 125;
-      data[i * 4 + 1] = Math.random() * 255 - 125;
-    }
+// Start at zero — no green tint on load
     const dataTexture = new THREE.DataTexture(
       data, size, size, THREE.RGBAFormat, THREE.FloatType
     );
@@ -371,8 +368,8 @@ export default function WorkGrid({ onSwitchToList }) {
     // Blast distortion — same as homepage random init
     if (three.data && three.dataTexture) {
       for (let i = 0; i < GRID * GRID; i++) {
-        three.data[i * 4] = (Math.random() - 0.5) * 500;
-        three.data[i * 4 + 1] = (Math.random() - 0.5) * 500;
+        three.data[i * 4] = (Math.random() - 0.5) * 30;
+        three.data[i * 4 + 1] = (Math.random() - 0.5) * 30;
       }
       three.dataTexture.needsUpdate = true;
     }
