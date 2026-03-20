@@ -137,8 +137,10 @@ export default function WorkGrid({ onSwitchToList }) {
     videoRefs.current = [];
 
     items.forEach((item, i) => {
-      const wrapper = document.createElement('div');
+      const wrapper = document.createElement('a');
       wrapper.className = 'grid-video-item';
+      wrapper.href = `/work/${item.slug}`;
+      wrapper.style.cursor = 'pointer';
       wrapper.style.opacity = i === 0 ? '1' : '0';
       wrapper.style.zIndex = i === 0 ? '1' : '0';
 
