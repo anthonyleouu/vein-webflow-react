@@ -405,11 +405,14 @@ export default function WorkGrid({ onSwitchToList }) {
       const translateY = centerY - (H * (1 - scaleY)) / 2;
 
       if (animated && window.gsap) {
-        window.gsap.to(wrapper, {
-          x: translateX, y: translateY, scaleX, scaleY,
-          opacity: 1, zIndex: 1, duration: 0.5,
-          ease: 'power2.out', overwrite: true,
-        });
+        const isActive = i === s.currentIndex;
+window.gsap.to(wrapper, {
+  x: translateX, y: translateY, scaleX, scaleY,
+  opacity: 1, zIndex: 1,
+  duration: isActive ? 1.8 : 1.2,
+  delay: isActive ? 0 : 0.6,
+  ease: 'power3.inOut', overwrite: true,
+});
       } else {
         wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
         wrapper.style.opacity = '1';
