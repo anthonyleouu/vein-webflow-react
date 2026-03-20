@@ -67,7 +67,7 @@ export default async function handler(req, res) {
         : [];
 
       // Multi-reference categories — returns array of IDs
-      const categoryIds = item.fieldData['categories'] || [];
+      const categoryIds = item.fieldData['roles'] || [];
       const categories = Array.isArray(categoryIds)
         ? categoryIds.map(id => categoryMap[id] || id).filter(Boolean)
         : item.fieldData['category']
