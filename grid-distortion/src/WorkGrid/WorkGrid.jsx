@@ -2,31 +2,28 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 
 const vertexShader = `
-  uniform float time;
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
+uniform float time;
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
 
 const fragmentShader = `
-  uniform sampler2D uDataTexture;
-  uniform sampler2D uTexture;
-  uniform vec4 resolution;
-  varying vec2 vUv;
-  void main() {
-    vec2 uv = vUv;
-    vec4 offset = texture2D(uDataTexture, vUv);
-    gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
-  }
-`;
+uniform sampler2D uDataTexture;
+uniform sampler2D uTexture;
+uniform vec4 resolution;
+varying vec2 vUv;
+void main() {
+  vec2 uv = vUv;
+  vec4 offset = texture2D(uDataTexture, vUv);
+  gl_FragColor = texture2D(uTexture, uv - 0.02 * offset.rg);
+}`;
 
 const GRID = 20;
-const MOUSE_STRENGTH = 0.03;
-const MOUSE_RADIUS = 0.1;
+const MOUSE = 0.1;
+const STRENGTH = 0.03;
 const RELAXATION = 0.9;
-const BLAST_STRENGTH = 20;
 const SCROLL_COOLDOWN = 900;
 const LIST_ITEM_W = 0.4;
 const LIST_ITEM_H = 0.45;
@@ -48,26 +45,17 @@ export default function WorkGrid({ onSwitchToList }) {
   const wrapperRefs = useRef([]);
   const listOffsetRef = useRef(0);
   const listSnapTimerRef = useRef(null);
+  const threeRef = useRef({});
 
   const stateRef = useRef({
     currentIndex: 0,
     transitioning: false,
-    mouseX: 0,
-    mouseY: 0,
-    prevMouseX: 0,
-    prevMouseY: 0,
-    mouseVX: 0,
-    mouseVY: 0,
-    renderer: null,
-    scene: null,
-    camera: null,
-    plane: null,
-    uniforms: null,
-    dataTexture: null,
-    animId: null,
-    gridData: null,
     lastScrollTime: 0,
     isListView: false,
+  });
+
+  const mouseRef = useRef({
+    x: 0, y: 0, prevX: 0, prevY: 0, vX: 0, vY: 0
   });
 
   const [items, setItems] = useState([]);
@@ -84,9 +72,11 @@ export default function WorkGrid({ onSwitchToList }) {
       }
       .grid-video-item {
         position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
         overflow: hidden;
-        will-change: transform, opacity;
-        transform-origin: center center;
+        transition: opacity 0.8s ease;
       }
       .grid-video-item video {
         position: absolute;
@@ -110,26 +100,6 @@ export default function WorkGrid({ onSwitchToList }) {
     `);
   }, []);
 
-  // Unlock autoplay on first user gesture
-  useEffect(() => {
-    const unlock = () => {
-      videoRefs.current.forEach(v => {
-        if (v) v.play().then(() => v.pause()).catch(() => {});
-      });
-      window.removeEventListener('click', unlock);
-      window.removeEventListener('keydown', unlock);
-      window.removeEventListener('wheel', unlock);
-    };
-    window.addEventListener('click', unlock);
-    window.addEventListener('keydown', unlock);
-    window.addEventListener('wheel', unlock);
-    return () => {
-      window.removeEventListener('click', unlock);
-      window.removeEventListener('keydown', unlock);
-      window.removeEventListener('wheel', unlock);
-    };
-  }, []);
-
   const scramble = useCallback((element, text) => {
     if (!element || !window.gsap) return;
     window.gsap.to(element, {
@@ -146,6 +116,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (counterEl) scramble(counterEl, `[PROJECT ${num}]`);
   }, [scramble]);
 
+  // Fetch items
   useEffect(() => {
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
@@ -158,6 +129,7 @@ export default function WorkGrid({ onSwitchToList }) {
       .catch(() => setLoading(false));
   }, []);
 
+  // Build video elements — each with its own hidden video
   useEffect(() => {
     if (loading || !items.length) return;
     const stack = document.querySelector('.video-stack');
@@ -170,14 +142,11 @@ export default function WorkGrid({ onSwitchToList }) {
     items.forEach((item, i) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'grid-video-item';
-      wrapper.style.cssText = `
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        opacity: ${i === 0 ? 1 : 0};
-        z-index: ${i === 0 ? 1 : 0};
-      `;
+      wrapper.style.opacity = i === 0 ? '1' : '0';
+      wrapper.style.zIndex = i === 0 ? '1' : '0';
 
       const video = document.createElement('video');
+      video.src = item.videoUrl;
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
@@ -190,97 +159,205 @@ export default function WorkGrid({ onSwitchToList }) {
       videoRefs.current[i] = video;
     });
 
-    // Overlay
+    // Dark overlay
     const overlay = document.createElement('div');
     overlay.style.cssText = `
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.15);
-      z-index: 10;
-      pointer-events: none;
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.15);
+      z-index: 10; pointer-events: none;
     `;
     stack.appendChild(overlay);
 
+    // Set initial UI text
     const titleEl = document.querySelector('.title-name');
     const counterEl = document.querySelector('.work-counter');
     if (titleEl) titleEl.textContent = items[0].name.toUpperCase();
     if (counterEl) counterEl.textContent = '[PROJECT 01]';
   }, [loading, items]);
 
-  const loadVideoTexture = useCallback((index) => {
-    const s = stateRef.current;
-    if (!s.uniforms) return;
-    const allItems = itemsRef.current;
-    if (!allItems.length) return;
-    const item = allItems[index];
-    if (!item?.videoUrl) return;
-    const video = videoRefs.current[index];
-    if (!video) return;
+  // Setup Three.js — mirrors GridDistortion.jsx exactly
+  useEffect(() => {
+    if (loading || !items.length) return;
 
-    const applyTexture = () => {
-      const texture = new THREE.VideoTexture(video);
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.wrapS = THREE.ClampToEdgeWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
-      s.uniforms.uTexture.value = texture;
+    const container = document.querySelector('.work-canvas');
+    if (!container) return;
 
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      const containerAspect = W / H;
-      const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
-      let scaleX, scaleY;
-      if (containerAspect > videoAspect) {
-        scaleX = containerAspect;
-        scaleY = containerAspect / videoAspect;
+    const scene = new THREE.Scene();
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
+    camera.position.z = 2;
+
+    const uniforms = {
+      time: { value: 0 },
+      resolution: { value: new THREE.Vector4() },
+      uTexture: { value: null },
+      uDataTexture: { value: null },
+    };
+
+    // Initialize data texture with random values — creates the load animation
+    const size = GRID;
+    const data = new Float32Array(4 * size * size);
+    for (let i = 0; i < size * size; i++) {
+      data[i * 4] = Math.random() * 255 - 125;
+      data[i * 4 + 1] = Math.random() * 255 - 125;
+    }
+    const dataTexture = new THREE.DataTexture(
+      data, size, size, THREE.RGBAFormat, THREE.FloatType
+    );
+    dataTexture.needsUpdate = true;
+    uniforms.uDataTexture.value = dataTexture;
+
+    const material = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms,
+      vertexShader,
+      fragmentShader,
+      transparent: true,
+    });
+
+    const geometry = new THREE.PlaneGeometry(1, 1, size - 1, size - 1);
+    const plane = new THREE.Mesh(geometry, material);
+    scene.add(plane);
+
+    // Load first video texture
+    const loadTexture = (index) => {
+      const video = videoRefs.current[index];
+      if (!video) return;
+
+      const apply = () => {
+        const texture = new THREE.VideoTexture(video);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        uniforms.uTexture.value = texture;
+
+        const rect = container.getBoundingClientRect();
+        const W = rect.width || window.innerWidth;
+        const H = rect.height || window.innerHeight;
+        const containerAspect = W / H;
+        const videoAspect = video.videoWidth / video.videoHeight || 16 / 9;
+        let scaleX, scaleY;
+        if (containerAspect > videoAspect) {
+          scaleX = containerAspect;
+          scaleY = containerAspect / videoAspect;
+        } else {
+          scaleX = videoAspect;
+          scaleY = 1;
+        }
+        plane.scale.set(scaleX, scaleY, 1);
+        video.play().catch(() => {});
+      };
+
+      if (video.readyState >= 1) {
+        apply();
       } else {
-        scaleX = videoAspect;
-        scaleY = 1;
-      }
-      if (s.plane) s.plane.scale.set(scaleX, scaleY, 1);
-
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => {
-          setTimeout(() => video.play().catch(() => {}), 300);
-        });
+        video.addEventListener('loadedmetadata', apply, { once: true });
       }
     };
 
-    if (video.readyState >= 2) {
-      applyTexture();
-    } else {
-      video.crossOrigin = 'anonymous';
-      video.src = item.videoUrl;
-      video.addEventListener('loadedmetadata', applyTexture, { once: true });
-      video.load();
-    }
-  }, []);
+    threeRef.current = {
+      renderer, scene, camera, plane, uniforms,
+      dataTexture, data, loadTexture,
+    };
 
-  const preloadVideo = useCallback((index) => {
-    const allItems = itemsRef.current;
-    const item = allItems[index];
-    if (!item?.videoUrl) return;
-    const video = videoRefs.current[index];
-    if (!video || video.src) return;
-    video.crossOrigin = 'anonymous';
-    video.src = item.videoUrl;
-    video.load();
-  }, []);
+    const handleResize = () => {
+      const rect = container.getBoundingClientRect();
+      const W = rect.width || window.innerWidth;
+      const H = rect.height || window.innerHeight;
+      if (!W || !H) return;
+      renderer.setSize(W, H);
+      const aspect = W / H;
+      const frustumH = 1;
+      const frustumW = frustumH * aspect;
+      camera.left = -frustumW / 2;
+      camera.right = frustumW / 2;
+      camera.top = frustumH / 2;
+      camera.bottom = -frustumH / 2;
+      camera.updateProjectionMatrix();
+      uniforms.resolution.value.set(W, H, 1, 1);
+    };
 
-  const blastExit = useCallback(() => {
-    const s = stateRef.current;
-    const d = s.gridData;
-    if (!d) return;
-    for (let i = 0; i < GRID * GRID; i++) {
-      d[i * 4] = (Math.random() - 0.5) * BLAST_STRENGTH;
-      d[i * 4 + 1] = (Math.random() - 0.5) * BLAST_STRENGTH;
-    }
-    if (s.dataTexture) s.dataTexture.needsUpdate = true;
-  }, []);
+    const resizeObserver = new ResizeObserver(() => handleResize());
+    resizeObserver.observe(container);
+    handleResize();
+    loadTexture(0);
 
+    let animId;
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+      uniforms.time.value += 0.05;
+
+      const d = data;
+      for (let i = 0; i < size * size; i++) {
+        d[i * 4] *= RELAXATION;
+        d[i * 4 + 1] *= RELAXATION;
+      }
+
+      const m = mouseRef.current;
+      const gridMouseX = size * m.x;
+      const gridMouseY = size * m.y;
+      const maxDist = size * MOUSE;
+
+      for (let i = 0; i < size; i++) {
+        for (let j = 0; j < size; j++) {
+          const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
+          if (distSq < maxDist * maxDist) {
+            const idx = 4 * (i + size * j);
+            const power = Math.min(maxDist / Math.sqrt(distSq), 10);
+            d[idx] += STRENGTH * 100 * m.vX * power;
+            d[idx + 1] -= STRENGTH * 100 * m.vY * power;
+          }
+        }
+      }
+
+      dataTexture.needsUpdate = true;
+      if (uniforms.uTexture.value) uniforms.uTexture.value.needsUpdate = true;
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      resizeObserver.disconnect();
+      container.innerHTML = '';
+      renderer.dispose();
+      renderer.forceContextLoss();
+      geometry.dispose();
+      material.dispose();
+      dataTexture.dispose();
+    };
+  }, [loading, items]);
+
+  // Mouse tracking — relative to container like GridDistortion.jsx
+  useEffect(() => {
+    const container = document.querySelector('.work-canvas');
+    if (!container) return;
+
+    const handleMouseMove = (e) => {
+      const rect = container.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = 1 - (e.clientY - rect.top) / rect.height;
+      const m = mouseRef.current;
+      m.vX = x - m.prevX;
+      m.vY = y - m.prevY;
+      Object.assign(m, { x, y, prevX: x, prevY: y });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [loading]);
+
+  // Navigate — blast data texture, swap videos, swap WebGL texture
   const navigateTo = useCallback((newIndex) => {
     const s = stateRef.current;
     const allItems = itemsRef.current;
@@ -289,50 +366,57 @@ export default function WorkGrid({ onSwitchToList }) {
 
     const total = allItems.length;
     const wrapped = ((newIndex % total) + total) % total;
+    const three = threeRef.current;
 
-    blastExit();
+    // Blast distortion — same as homepage random init
+    if (three.data && three.dataTexture) {
+      for (let i = 0; i < GRID * GRID; i++) {
+        three.data[i * 4] = (Math.random() - 0.5) * 500;
+        three.data[i * 4 + 1] = (Math.random() - 0.5) * 500;
+      }
+      three.dataTexture.needsUpdate = true;
+    }
 
+    // Fade out current
     const currentWrapper = wrapperRefs.current[s.currentIndex];
     const nextWrapper = wrapperRefs.current[wrapped];
 
-    if (nextWrapper) {
-      nextWrapper.style.zIndex = 0;
-      nextWrapper.style.opacity = 0;
+    if (currentWrapper) {
+      currentWrapper.style.opacity = '0';
+      currentWrapper.style.zIndex = '0';
     }
 
-    if (window.gsap && currentWrapper && nextWrapper) {
-      window.gsap.to(currentWrapper, {
-        opacity: 0,
-        duration: 0.8,
-        ease: 'power2.inOut',
-        onComplete: () => {
-          currentWrapper.style.zIndex = 0;
-          videoRefs.current[s.currentIndex]?.pause();
-        },
-      });
+    setTimeout(() => {
+      // Pause current video
+      videoRefs.current[s.currentIndex]?.pause();
 
-      window.gsap.to(nextWrapper, {
-        opacity: 1,
-        duration: 0.8,
-        delay: 0.3,
-        ease: 'power2.inOut',
-        onStart: () => { nextWrapper.style.zIndex = 1; },
-      });
-    } else {
-      if (currentWrapper) { currentWrapper.style.opacity = 0; currentWrapper.style.zIndex = 0; }
-      if (nextWrapper) { nextWrapper.style.opacity = 1; nextWrapper.style.zIndex = 1; }
-    }
+      // Show next video
+      if (nextWrapper) {
+        nextWrapper.style.zIndex = '1';
+        nextWrapper.style.opacity = '1';
+      }
 
-    s.currentIndex = wrapped;
-    loadVideoTexture(wrapped);
-    updateUI(allItems[wrapped], wrapped);
+      // Play next video and swap WebGL texture
+      const nextVideo = videoRefs.current[wrapped];
+      if (nextVideo) {
+        nextVideo.play().catch(() => {});
+        three.loadTexture?.(wrapped);
+      }
 
-    const nextIdx = ((wrapped + 1) % total + total) % total;
-    preloadVideo(nextIdx);
+      s.currentIndex = wrapped;
+      updateUI(allItems[wrapped], wrapped);
 
-    setTimeout(() => { s.transitioning = false; }, 1100);
-  }, [blastExit, loadVideoTexture, updateUI, preloadVideo]);
+      const nextIdx = ((wrapped + 1) % total + total) % total;
+      const preloadVid = videoRefs.current[nextIdx];
+      if (preloadVid && !preloadVid.src) {
+        preloadVid.src = allItems[nextIdx].videoUrl;
+      }
 
+      setTimeout(() => { s.transitioning = false; }, 600);
+    }, 400);
+  }, [updateUI]);
+
+  // List positions
   const applyListPositions = useCallback((offset, animated = false) => {
     const W = window.innerWidth;
     const H = window.innerHeight;
@@ -355,17 +439,14 @@ export default function WorkGrid({ onSwitchToList }) {
 
       if (animated && window.gsap) {
         window.gsap.to(wrapper, {
-          x: translateX, y: translateY,
-          scaleX, scaleY,
-          opacity: 1, zIndex: 1,
-          duration: 0.5,
-          ease: 'power2.out',
-          overwrite: true,
+          x: translateX, y: translateY, scaleX, scaleY,
+          opacity: 1, zIndex: 1, duration: 0.5,
+          ease: 'power2.out', overwrite: true,
         });
       } else {
         wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
-        wrapper.style.opacity = 1;
-        wrapper.style.zIndex = 1;
+        wrapper.style.opacity = '1';
+        wrapper.style.zIndex = '1';
       }
     });
   }, []);
@@ -375,11 +456,9 @@ export default function WorkGrid({ onSwitchToList }) {
     const itemW = W * LIST_ITEM_W;
     const step = itemW + LIST_GAP;
     const total = itemsRef.current.length;
-    let closest = 0;
-    let minDist = Infinity;
+    let closest = 0, minDist = Infinity;
     for (let i = 0; i < total; i++) {
-      const itemCenter = i * step - offset + itemW / 2;
-      const dist = Math.abs(itemCenter - W / 2);
+      const dist = Math.abs(i * step - offset + itemW / 2 - W / 2);
       if (dist < minDist) { minDist = dist; closest = i; }
     }
     return closest;
@@ -391,14 +470,12 @@ export default function WorkGrid({ onSwitchToList }) {
     const step = itemW + LIST_GAP;
     const s = stateRef.current;
     const closest = getClosestIndex(listOffsetRef.current);
-    const targetOffset = closest * step;
     s.currentIndex = closest;
     updateUI(itemsRef.current[closest], closest);
     if (window.gsap) {
       window.gsap.to(listOffsetRef, {
-        current: targetOffset,
-        duration: 0.6,
-        ease: 'power3.out',
+        current: closest * step,
+        duration: 0.6, ease: 'power3.out',
         onUpdate: () => applyListPositions(listOffsetRef.current),
       });
     }
@@ -420,15 +497,8 @@ export default function WorkGrid({ onSwitchToList }) {
 
     listOffsetRef.current = s.currentIndex * step;
 
-    itemsRef.current.forEach((item, i) => {
-      const video = videoRefs.current[i];
-      if (video && !video.src) {
-        video.crossOrigin = 'anonymous';
-        video.src = item.videoUrl;
-        video.load();
-      }
-      if (video) video.play().catch(() => {});
-    });
+    // Play all videos
+    videoRefs.current.forEach(v => v?.play().catch(() => {}));
 
     wrapperRefs.current.forEach((wrapper, i) => {
       if (!wrapper) return;
@@ -441,12 +511,9 @@ export default function WorkGrid({ onSwitchToList }) {
       const translateX = rawX - (W * (1 - scaleX)) / 2;
       const translateY = centerY - (H * (1 - scaleY)) / 2;
       window.gsap.to(wrapper, {
-        x: translateX, y: translateY,
-        scaleX, scaleY,
-        opacity: 1, zIndex: 1,
-        duration: 1.8,
-        ease: 'power3.inOut',
-        overwrite: true,
+        x: translateX, y: translateY, scaleX, scaleY,
+        opacity: 1, zIndex: 1, duration: 1.8,
+        ease: 'power3.inOut', overwrite: true,
       });
     });
 
@@ -463,13 +530,10 @@ export default function WorkGrid({ onSwitchToList }) {
       if (!wrapper) return;
       const isActive = i === s.currentIndex;
       window.gsap.to(wrapper, {
-        x: 0, y: 0,
-        scaleX: 1, scaleY: 1,
+        x: 0, y: 0, scaleX: 1, scaleY: 1,
         opacity: isActive ? 1 : 0,
         zIndex: isActive ? 1 : 0,
-        duration: 1.2,
-        ease: 'power3.inOut',
-        overwrite: true,
+        duration: 1.2, ease: 'power3.inOut', overwrite: true,
         onComplete: () => {
           if (!isActive) videoRefs.current[i]?.pause();
         },
@@ -480,108 +544,7 @@ export default function WorkGrid({ onSwitchToList }) {
     if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
   }, []);
 
-  useEffect(() => {
-    if (loading || !items.length) return;
-    const s = stateRef.current;
-
-    const canvasContainer = document.querySelector('.work-canvas');
-    if (!canvasContainer) return;
-
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true, alpha: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
-    canvasContainer.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -1000, 1000);
-    camera.position.z = 2;
-
-    const gridData = new Float32Array(4 * GRID * GRID);
-    const dataTexture = new THREE.DataTexture(gridData, GRID, GRID, THREE.RGBAFormat, THREE.FloatType);
-    dataTexture.needsUpdate = true;
-
-    const uniforms = {
-      time: { value: 0 },
-      resolution: { value: new THREE.Vector4() },
-      uTexture: { value: new THREE.Texture() },
-      uDataTexture: { value: dataTexture },
-    };
-
-    const material = new THREE.ShaderMaterial({
-      uniforms, vertexShader, fragmentShader,
-      transparent: true, side: THREE.DoubleSide,
-    });
-    const geometry = new THREE.PlaneGeometry(1, 1, GRID - 1, GRID - 1);
-    const plane = new THREE.Mesh(geometry, material);
-    scene.add(plane);
-
-    s.renderer = renderer;
-    s.scene = scene;
-    s.camera = camera;
-    s.plane = plane;
-    s.uniforms = uniforms;
-    s.dataTexture = dataTexture;
-    s.gridData = gridData;
-
-    const handleResize = () => {
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      renderer.setSize(W, H);
-      const aspect = W / H;
-      plane.scale.set(aspect, 1, 1);
-      const frustumH = 1;
-      const frustumW = frustumH * aspect;
-      camera.left = -frustumW / 2;
-      camera.right = frustumW / 2;
-      camera.top = frustumH / 2;
-      camera.bottom = -frustumH / 2;
-      camera.updateProjectionMatrix();
-      uniforms.resolution.value.set(W, H, 1, 1);
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-
-    loadVideoTexture(0);
-    if (items.length > 1) preloadVideo(1);
-
-    const animate = () => {
-      s.animId = requestAnimationFrame(animate);
-      uniforms.time.value += 0.05;
-      const d = gridData;
-      for (let i = 0; i < GRID * GRID; i++) {
-        d[i * 4] *= RELAXATION;
-        d[i * 4 + 1] *= RELAXATION;
-      }
-      const gridMouseX = GRID * (s.mouseX / window.innerWidth);
-      const gridMouseY = GRID * (1 - s.mouseY / window.innerHeight);
-      const maxDist = GRID * MOUSE_RADIUS;
-      for (let i = 0; i < GRID; i++) {
-        for (let j = 0; j < GRID; j++) {
-          const distSq = Math.pow(gridMouseX - i, 2) + Math.pow(gridMouseY - j, 2);
-          if (distSq < maxDist * maxDist) {
-            const idx = 4 * (i + GRID * j);
-            const power = Math.min(maxDist / Math.sqrt(distSq), 10);
-            d[idx] += MOUSE_STRENGTH * 100 * s.mouseVX * power;
-            d[idx + 1] -= MOUSE_STRENGTH * 100 * s.mouseVY * power;
-          }
-        }
-      }
-      dataTexture.needsUpdate = true;
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    return () => {
-      cancelAnimationFrame(s.animId);
-      window.removeEventListener('resize', handleResize);
-      canvasContainer.innerHTML = '';
-      renderer.dispose();
-    };
-  }, [loading, items, loadVideoTexture, preloadVideo]);
-
+  // Scroll
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
@@ -589,6 +552,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const handleWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
+
       if (s.isListView) {
         listOffsetRef.current += e.deltaY * 0.8;
         applyListPositions(listOffsetRef.current);
@@ -596,6 +560,7 @@ export default function WorkGrid({ onSwitchToList }) {
         listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
         return;
       }
+
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
       if (s.transitioning) return;
@@ -605,20 +570,16 @@ export default function WorkGrid({ onSwitchToList }) {
     };
 
     const handleKeyDown = (e) => {
-      const direction =
-        e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 :
-        e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
-      if (!direction) return;
+      const dir = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1
+                : e.key === 'ArrowUp'   || e.key === 'ArrowLeft'  ? -1 : 0;
+      if (!dir) return;
       if (s.isListView) {
-        const W = window.innerWidth;
-        const itemW = W * LIST_ITEM_W;
-        const step = itemW + LIST_GAP;
-        listOffsetRef.current += direction * step;
+        listOffsetRef.current += dir * (window.innerWidth * LIST_ITEM_W + LIST_GAP);
         applyListPositions(listOffsetRef.current, true);
         clearTimeout(listSnapTimerRef.current);
         listSnapTimerRef.current = setTimeout(() => snapToClosest(), 150);
       } else {
-        navigateTo(s.currentIndex + direction);
+        navigateTo(s.currentIndex + dir);
       }
     };
 
@@ -635,20 +596,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [items, navigateTo, applyListPositions, snapToClosest]);
 
-  useEffect(() => {
-    const s = stateRef.current;
-    const handleMouseMove = (e) => {
-      s.mouseVX = (e.clientX - s.prevMouseX) * 0.003;
-      s.mouseVY = (e.clientY - s.prevMouseY) * 0.003;
-      s.prevMouseX = s.mouseX;
-      s.prevMouseY = s.mouseY;
-      s.mouseX = e.clientX;
-      s.mouseY = e.clientY;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
-
+  // Toggle
   useEffect(() => {
     const btnGrid = document.querySelector('.btn-grid');
     const btnList = document.querySelector('.btn-list');
@@ -663,6 +611,7 @@ export default function WorkGrid({ onSwitchToList }) {
     };
   }, [switchToGrid, switchToList, onSwitchToList]);
 
+  // Click to open project
   useEffect(() => {
     if (!items.length) return;
     const s = stateRef.current;
