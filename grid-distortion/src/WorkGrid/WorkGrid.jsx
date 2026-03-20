@@ -445,36 +445,61 @@ window.gsap.to(wrapper, {
   }, []);
 
   const snapToClosest = useCallback(() => {
-    const W = window.innerWidth;
-    const itemW = W * LIST_ITEM_W;
-    const step = itemW + LIST_GAP;
-    const total = itemsRef.current.length;
-    const bandW = total * step;
-    const s = stateRef.current;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const itemW = W * LIST_ITEM_W;
+  const itemH = H * LIST_ITEM_H;
+  const step = itemW + LIST_GAP;
+  const total = itemsRef.current.length;
+  const bandW = total * step;
+  const s = stateRef.current;
+  const prevIndex = s.currentIndex;
 
-    const closest = getClosestIndex(listOffsetRef.current);
-    s.currentIndex = closest;
-    updateUI(itemsRef.current[closest], closest);
+  const closest = getClosestIndex(listOffsetRef.current);
+  s.currentIndex = closest;
+  updateUI(itemsRef.current[closest], closest);
 
-    let targetOffset = closest * step;
-    const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
-    const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
-    targetOffset = listOffsetRef.current + shortDiff;
-
-    if (window.gsap) {
-      window.gsap.to(listOffsetRef, {
-        current: targetOffset,
-        duration: 0.6, ease: 'power3.out',
-        onUpdate: () => {
-          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-          applyListPositions(listOffsetRef.current);
-        },
-        onComplete: () => {
-          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-        }
+  // If active changed, ensure previous active is properly positioned in list
+  if (prevIndex !== closest) {
+    const prevWrapper = wrapperRefs.current[prevIndex];
+    if (prevWrapper && window.gsap) {
+      const centerX = (W - itemW) / 2;
+      const centerY = (H - itemH) / 2;
+      let offset = prevIndex - closest;
+      if (offset > total / 2) offset -= total;
+      if (offset < -total / 2) offset += total;
+      const rawX = centerX + offset * step;
+      const scaleX = itemW / W;
+      const scaleY = itemH / H;
+      const translateX = rawX - (W * (1 - scaleX)) / 2;
+      const translateY = centerY - (H * (1 - scaleY)) / 2;
+      window.gsap.set(prevWrapper, {
+        x: translateX, y: translateY,
+        scaleX, scaleY,
+        opacity: 1, zIndex: 1,
       });
     }
-  }, [getClosestIndex, updateUI, applyListPositions]);
+  }
+
+  let targetOffset = closest * step;
+  const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
+  const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
+  targetOffset = listOffsetRef.current + shortDiff;
+
+  if (window.gsap) {
+    window.gsap.to(listOffsetRef, {
+      current: targetOffset,
+      duration: 0.6, ease: 'power3.out',
+      onUpdate: () => {
+        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        applyListPositions(listOffsetRef.current);
+      },
+      onComplete: () => {
+        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+      }
+    });
+  }
+}, [getClosestIndex, updateUI, applyListPositions]);
 
   const switchToList = useCallback(() => {
     const s = stateRef.current;
