@@ -442,39 +442,36 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const snapToClosest = useCallback(() => {
-  const W = window.innerWidth;
-  const itemW = W * LIST_ITEM_W;
-  const step = itemW + LIST_GAP;
-  const total = itemsRef.current.length;
-  const bandW = total * step;
-  const s = stateRef.current;
+    const W = window.innerWidth;
+    const itemW = W * LIST_ITEM_W;
+    const step = itemW + LIST_GAP;
+    const total = itemsRef.current.length;
+    const bandW = total * step;
+    const s = stateRef.current;
 
-  const closest = getClosestIndex(listOffsetRef.current);
-  s.currentIndex = closest;
-  updateUI(itemsRef.current[closest], closest);
+    const closest = getClosestIndex(listOffsetRef.current);
+    s.currentIndex = closest;
+    updateUI(itemsRef.current[closest], closest);
 
-  // Target offset normalized within band
-  let targetOffset = closest * step;
-  // Find the nearest equivalent of targetOffset to current offset
-  const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
-  const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
-  targetOffset = listOffsetRef.current + shortDiff;
+    let targetOffset = closest * step;
+    const diff = ((targetOffset - listOffsetRef.current + bandW * 10) % bandW);
+    const shortDiff = diff > bandW / 2 ? diff - bandW : diff;
+    targetOffset = listOffsetRef.current + shortDiff;
 
-  if (window.gsap) {
-    window.gsap.to(listOffsetRef, {
-      current: targetOffset,
-      duration: 0.6, ease: 'power3.out',
-      onUpdate: () => {
-        // Normalize during animation too
-        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-        applyListPositions(listOffsetRef.current);
-      },
-      onComplete: () => {
-        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-      }
-    });
-  }
-}, [getClosestIndex, updateUI, applyListPositions]);
+    if (window.gsap) {
+      window.gsap.to(listOffsetRef, {
+        current: targetOffset,
+        duration: 0.6, ease: 'power3.out',
+        onUpdate: () => {
+          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+          applyListPositions(listOffsetRef.current);
+        },
+        onComplete: () => {
+          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+        }
+      });
+    }
+  }, [getClosestIndex, updateUI, applyListPositions]);
 
   const switchToList = useCallback(() => {
     const s = stateRef.current;
@@ -491,6 +488,15 @@ export default function WorkGrid({ onSwitchToList }) {
     const total = wrapperRefs.current.length;
 
     listOffsetRef.current = s.currentIndex * step;
+
+    // Key fix: reset all non-active wrappers to hidden fullscreen
+    // before animating them to list positions
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper || i === s.currentIndex) return;
+      window.gsap.killTweensOf(wrapper);
+      window.gsap.set(wrapper, { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 0, zIndex: 0 });
+    });
+
     videoRefs.current.forEach(v => v?.play().catch(() => {}));
 
     wrapperRefs.current.forEach((wrapper, i) => {
@@ -515,26 +521,24 @@ export default function WorkGrid({ onSwitchToList }) {
   }, []);
 
   const switchToGrid = useCallback(() => {
-  const s = stateRef.current;
-  if (!s.isListView || !window.gsap) return;
-  s.isListView = false;
+    const s = stateRef.current;
+    if (!s.isListView || !window.gsap) return;
+    s.isListView = false;
 
-  const activeIndex = s.currentIndex;
-  const W = window.innerWidth;
-  const H = window.innerHeight;
+    const activeIndex = s.currentIndex;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
 
-  // Step 1 — synchronously hide ALL non-active videos before anything else
-  wrapperRefs.current.forEach((wrapper, i) => {
-    if (!wrapper) return;
-    window.gsap.killTweensOf(wrapper);
-    if (i !== activeIndex) {
+    // Instantly hide all non-active — they're already at opacity:0
+    // from the switchToList reset, so this is just a safety measure
+    wrapperRefs.current.forEach((wrapper, i) => {
+      if (!wrapper || i === activeIndex) return;
+      window.gsap.killTweensOf(wrapper);
       window.gsap.set(wrapper, { opacity: 0, zIndex: -1 });
       videoRefs.current[i]?.pause();
-    }
-  });
+    });
 
-  // Step 2 — on next frame, get position and animate
-  requestAnimationFrame(() => {
+    // Get active wrapper's current screen position
     const activeWrapper = wrapperRefs.current[activeIndex];
     if (!activeWrapper) return;
 
@@ -546,6 +550,7 @@ export default function WorkGrid({ onSwitchToList }) {
     const x = rect.left - (W * (1 - scaleX)) / 2;
     const y = rect.top - (H * (1 - scaleY)) / 2;
 
+    // Set to current position using transforms, then animate to fullscreen
     window.gsap.set(activeWrapper, {
       x, y, scaleX, scaleY,
       opacity: 1, zIndex: 10,
@@ -568,11 +573,10 @@ export default function WorkGrid({ onSwitchToList }) {
         }
       },
     });
-  });
 
-  const canvas = document.querySelector('.work-canvas');
-  if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
-}, []);
+    const canvas = document.querySelector('.work-canvas');
+    if (canvas) window.gsap.to(canvas, { opacity: 1, duration: 0.8, delay: 0.5 });
+  }, []);
 
   useEffect(() => {
     if (!items.length) return;
@@ -583,39 +587,36 @@ export default function WorkGrid({ onSwitchToList }) {
       e.stopPropagation();
 
       if (s.isListView) {
-  const W = window.innerWidth;
-  const itemW = W * LIST_ITEM_W;
-  const step = itemW + LIST_GAP;
-  const total = itemsRef.current.length;
-  const bandW = total * step;
+        const W = window.innerWidth;
+        const itemW = W * LIST_ITEM_W;
+        const step = itemW + LIST_GAP;
+        const total = itemsRef.current.length;
+        const bandW = total * step;
 
-  // Add momentum — larger delta = bigger throw
-  const momentum = e.deltaY * 4;
-  const targetOffset = listOffsetRef.current + momentum;
+        const momentum = e.deltaY * 4;
+        const targetOffset = listOffsetRef.current + momentum;
 
-  // Animate to target with ease out — feels like a throw
-  if (window.gsap) {
-    window.gsap.killTweensOf(listOffsetRef);
-    window.gsap.to(listOffsetRef, {
-      current: targetOffset,
-      duration: 0.8,
-      ease: 'power3.out',
-      overwrite: true,
-      onUpdate: () => {
-        listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-        applyListPositions(listOffsetRef.current);
-      },
-    });
-  } else {
-    listOffsetRef.current = ((targetOffset % bandW) + bandW) % bandW;
-    applyListPositions(listOffsetRef.current);
-  }
+        if (window.gsap) {
+          window.gsap.killTweensOf(listOffsetRef);
+          window.gsap.to(listOffsetRef, {
+            current: targetOffset,
+            duration: 0.8,
+            ease: 'power3.out',
+            overwrite: true,
+            onUpdate: () => {
+              listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
+              applyListPositions(listOffsetRef.current);
+            },
+          });
+        } else {
+          listOffsetRef.current = ((targetOffset % bandW) + bandW) % bandW;
+          applyListPositions(listOffsetRef.current);
+        }
 
-  // Snap after scrolling stops
-  clearTimeout(listSnapTimerRef.current);
-  listSnapTimerRef.current = setTimeout(() => snapToClosest(), 500);
-  return;
-}
+        clearTimeout(listSnapTimerRef.current);
+        listSnapTimerRef.current = setTimeout(() => snapToClosest(), 500);
+        return;
+      }
 
       const now = Date.now();
       if (now - s.lastScrollTime < SCROLL_COOLDOWN) return;
