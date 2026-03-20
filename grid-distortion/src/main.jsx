@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import GridDistortion from './GridDistortion/GridDistortion';
 import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
 import WorkGrid from './WorkGrid/WorkGrid';
+import ProjectGallery from './ProjectGallery/ProjectGallery';
 
 window.mountAll = function mountAll() {
   // Mount GridDistortion
@@ -39,6 +40,14 @@ window.mountAll = function mountAll() {
     workContainer._mounted = true;
     const root = createRoot(workContainer);
     root.render(<WorkGrid />);
+  }
+
+  // Mount ProjectGallery
+  const projectContainer = document.getElementById('project-root');
+  if (projectContainer && !projectContainer._mounted) {
+    projectContainer._mounted = true;
+    const root = createRoot(projectContainer);
+    root.render(<ProjectGallery />);
   }
 };
 
