@@ -484,8 +484,11 @@ export default function WorkGrid({ onSwitchToList }) {
           applyListPositions(listOffsetRef.current);
         },
         onComplete: () => {
-          listOffsetRef.current = ((listOffsetRef.current % bandW) + bandW) % bandW;
-        }
+  // Small delay to ensure animation fully completes
+  setTimeout(() => {
+    window.location.href = `/work/${item.slug}`;
+  }, 50);
+},
       });
     }
   }, [getClosestIndex, updateUI, applyListPositions]);
