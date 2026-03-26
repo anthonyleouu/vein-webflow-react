@@ -26,12 +26,10 @@ const vertexShader = `
     // Normalize x to [-1, 1]
     float nx = pos.x / (${CARD_W.toFixed(1)} * 0.5);
 
-    // Bend: push Z forward at edges based on uBend
-    // sin curve: 0 at center, max at edges
-    pos.z += sin(nx * 3.14159) * uBend * ${(CARD_W * 0.18).toFixed(1)};
+    // Parabolic curve: zero at center, max at left/right edges
+    
+    pos.z += (nx * nx) * uBend * 274.0;
 
-    // Slight vertical pinch at edges to complete the paper feel
-    pos.y *= 1.0 - abs(nx) * abs(uBend) * 0.08;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
