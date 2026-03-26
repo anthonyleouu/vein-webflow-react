@@ -1,72 +1,75 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-const CARD_W         = 1246;
-const CARD_H         = 700;
-const GAP            = 256;
-const STEP           = CARD_W + GAP;
-const SEGMENTS_X     = 32;
-const SEGMENTS_Y     = 20;
-const BEND_MAX       = 0.6;
-const BEND_EASE      = 0.018;
-const MOMENTUM_DECAY = 0.92;
-const DRAG_MULTI     = 1.4;
-const WHEEL_MULTI    = 0.55;
-const BG_COLOR       = 0xfffdfc;
+// ── Constants ──────────────────────────────────────────────────────────────────
+const CARD_W          = 1246;
+const CARD_H          = 700;
+const GAP             = 256;
+const STEP            = CARD_W + GAP;
+const SEGMENTS_X      = 48;      // high for smooth top/bottom arc
+const SEGMENTS_Y      = 48;      // high for smooth side bow
+const TENSION_MAX     = 1.0;     // max tension intensity
+const TENSION_EASE    = 0.016;   // ~1.5s return to rest — damped, premium
+const MOMENTUM_DECAY  = 0.91;
+const DRAG_MULTI      = 1.4;
+const WHEEL_MULTI     = 0.5;
+const BG_COLOR        = 0xfffdfc;
 
-// Asymmetric bend:
-// uBend = signed bend intensity
-// uOffsetX = card's rawX position (negative = left of center, positive = right)
-// Outer edge bends more, inner edge bends less
+// ── Vertex Shader ─────────────────────────────────────────────────────────────
+// uTension: signed velocity-based tension (-1 to +1)
+//   positive = moving right, negative = moving left
+//
+// The deformation:
+//   Top edge (ny=+1): arcs in Z. Direction depends on sign of uTension.
+//   Bottom edge (ny=-1): arcs in Z, mirrored.
+//   Side edges (nx=±1): subtle bow in Z.
+//   Center area: mostly stable, minimal Z movement.
+//
+// Shape language: smooth arcs across all 4 boundaries,
+// center pinned, edges flex under horizontal tension.
 const vertexShader = `
-  uniform float uBend;
-  uniform float uOffsetX;
+  uniform float uTension;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vec3 pos = position;
 
-    float halfW  = ${(CARD_W * 0.5).toFixed(1)};
-    float halfH  = ${(CARD_H * 0.5).toFixed(1)};
-    float nx     = pos.x / halfW;   // -1 to +1 across card width
-    float ny     = pos.y / halfH;   // -1 to +1 across card height
+    // Normalize to [-1, +1]
+    float nx = pos.x / ${(CARD_W * 0.5).toFixed(1)};  // -1 left, +1 right
+    float ny = pos.y / ${(CARD_H * 0.5).toFixed(1)};  // -1 bottom, +1 top
 
-    // Which side of center is this card on?
-    // cardSide: -1 = left of center, 0 = at center, +1 = right of center
-    float cardSide = sign(uOffsetX);
+    float t = uTension; // signed: + = moving right, - = moving left
 
-    // For a card to the LEFT (cardSide = -1):
-    //   left edge  (nx = -1) is the OUTER edge → bends a lot
-    //   right edge (nx = +1) is the INNER edge → bends a little
-    // For a card to the RIGHT (cardSide = +1):
-    //   right edge (nx = +1) is the OUTER edge → bends a lot
-    //   left edge  (nx = -1) is the INNER edge → bends a little
-    // For CENTER card (cardSide = 0): symmetric
+    // ── TOP and BOTTOM edge arc ──────────────────────────────────────
+    // When moving right (+t), the top and bottom edges bow FORWARD in Z.
+    // The arc is a parabola along X: max at center (nx=0), zero at edges (nx=±1).
+    // This creates a "membrane under horizontal tension" feel.
+    //
+    // ny factor: edges (ny=±1) get full effect, center (ny=0) gets none.
+    // This keeps the center of the card stable.
+    float edgeFactor = ny * ny;                        // 1 at top/bottom, 0 at vertical center
+    float arcX = (1.0 - nx * nx);                      // parabola: 1 at center, 0 at sides
+    float topBottomArc = arcX * edgeFactor * t * ${(CARD_H * 0.38).toFixed(1)};
 
-    float outerStrength = 1.0;
-    float innerStrength = 0.12;
+    // ── SIDE edge bow ─────────────────────────────────────────────────
+    // Side edges bow slightly inward/outward based on direction.
+    // nx=±1 get max effect, center gets none.
+    // ny factor: strongest at vertical center of edge, fades toward corners.
+    float sideEdgeFactor = nx * nx;                    // 1 at sides, 0 at horizontal center
+    float arcY = (1.0 - ny * ny);                      // parabola: 1 at vert center, 0 at top/bottom
+    float sideBow = sideEdgeFactor * arcY * t * ${(CARD_W * 0.04).toFixed(1)};
 
-    // t: how "outer" is this vertex? 0 = inner edge, 1 = outer edge
-    float t;
-    if (abs(cardSide) < 0.1) {
-      // center card: symmetric — both edges equal
-      t = 0.5;
-    } else {
-      // nx goes -1 to +1
-      // if cardSide = -1: outer is at nx=-1, inner at nx=+1
-      //   → t = (-nx + 1) / 2 ... wait, we want t=1 when nx=-1
-      //   → t = (1.0 - nx * cardSide) / 2.0 ... 
-      // simpler: t = (1.0 + nx * (-cardSide)) * 0.5
-      t = (1.0 + nx * (-cardSide)) * 0.5;
-    }
+    // ── Apply Z displacement ──────────────────────────────────────────
+    pos.z += topBottomArc + sideBow;
 
-    float strength = mix(innerStrength, outerStrength, t * t);
-    float bend = strength * uBend * 200.0;
-    pos.z += bend;
-
-    // Subtle vertical barrel — always present when bending
-    pos.z += (ny * ny) * abs(uBend) * 50.0;
+    // ── Slight Y displacement on top/bottom edges ─────────────────────
+    // Gives a very subtle "pulling" feel to the top/bottom arcs.
+    // The top edge lifts slightly toward the direction of motion.
+    // The bottom edge drops slightly away from it.
+    // Very small — just enough to feel physical.
+    float yPull = arcX * ny * t * ${(CARD_H * 0.018).toFixed(1)};
+    pos.y += yPull;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -87,26 +90,26 @@ export default function WorkSlider() {
     const container = document.getElementById('work-slider-root');
     if (!container) return;
 
-    let cards        = [];
-    let offset       = 0;
-    let velocity     = 0;
-    let targetBend   = 0;
-    let currentBend  = 0;
-    let isDragging   = false;
-    let dragStartX   = 0;
+    let cards           = [];
+    let offset          = 0;
+    let velocity        = 0;
+    let targetTension   = 0;
+    let currentTension  = 0;
+    let isDragging      = false;
+    let dragStartX      = 0;
     let dragOffsetStart = 0;
-    let lastDragX    = 0;
-    let dragVel      = 0;
-    let animId       = null;
-    let hoveredIndex = -1;
-    let snapTimer    = null;
-    let isSnapping   = false;
-    let snapTarget   = 0;
+    let lastDragX       = 0;
+    let dragVel         = 0;
+    let animId          = null;
+    let hoveredIndex    = -1;
+    let snapTimer       = null;
+    let isSnapping      = false;
+    let snapTarget      = 0;
 
     const numEl    = document.getElementById('work-number');
     const clientEl = document.getElementById('work-client');
-    if (numEl)    { numEl.style.opacity = '0'; numEl.style.transition = 'opacity 0.2s'; }
-    if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.2s'; }
+    if (numEl)    { numEl.style.opacity = '0'; numEl.style.transition = 'opacity 0.25s'; }
+    if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.25s'; }
 
     const W    = window.innerWidth;
     const H    = window.innerHeight;
@@ -115,7 +118,8 @@ export default function WorkSlider() {
     const camZ = H / (2 * Math.tan(vFov / 2));
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true, alpha: false,
+      antialias: true,
+      alpha: false,
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -133,20 +137,22 @@ export default function WorkSlider() {
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2(-9999, -9999);
 
+    // ── Card factory ──────────────────────────────────────────────────────────
     function createCard(item, index) {
       const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS_X, SEGMENTS_Y);
+
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
-      c.getContext('2d').fillStyle = '#999';
+      c.getContext('2d').fillStyle = '#888';
       c.getContext('2d').fillRect(0, 0, 4, 4);
 
       const mat = new THREE.ShaderMaterial({
-        vertexShader, fragmentShader,
+        vertexShader,
+        fragmentShader,
         uniforms: {
-          uTexture:  { value: new THREE.CanvasTexture(c) },
-          uBend:     { value: 0.0 },
-          uOffsetX:  { value: 0.0 },
-          uOpacity:  { value: 1.0 },
+          uTexture: { value: new THREE.CanvasTexture(c) },
+          uTension: { value: 0.0 },
+          uOpacity: { value: 1.0 },
         },
         transparent: false,
         side: THREE.FrontSide,
@@ -191,6 +197,7 @@ export default function WorkSlider() {
       return { mesh, mat, vid, item, index };
     }
 
+    // ── Layout ────────────────────────────────────────────────────────────────
     function layout() {
       const total = cards.length;
       if (!total) return;
@@ -203,11 +210,11 @@ export default function WorkSlider() {
 
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
-        card.mat.uniforms.uBend.value    = currentBend;
-        card.mat.uniforms.uOffsetX.value = rawX;
+        card.mat.uniforms.uTension.value = currentTension;
       });
     }
 
+    // ── Snap to nearest ───────────────────────────────────────────────────────
     function getCenter() {
       const total = cards.length;
       if (!total) return 0;
@@ -232,30 +239,36 @@ export default function WorkSlider() {
       isSnapping = true;
     }
 
+    // ── Render loop ───────────────────────────────────────────────────────────
     function animate() {
       animId = requestAnimationFrame(animate);
 
+      // Position update
       if (isSnapping) {
         const d = snapTarget - offset;
-        offset += d * 0.06;
-        if (Math.abs(d) < 0.3) { offset = snapTarget; isSnapping = false; }
+        offset += d * 0.055;
+        if (Math.abs(d) < 0.25) { offset = snapTarget; isSnapping = false; }
       } else if (!isDragging) {
         velocity *= MOMENTUM_DECAY;
         offset += velocity;
-        if (Math.abs(velocity) < 0.05) {
+        if (Math.abs(velocity) < 0.04) {
           velocity = 0;
           snapToCenter();
         }
       }
 
-      const spd = isDragging ? dragVel * 8 : velocity;
-      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.006));
-      currentBend += (targetBend - currentBend) * BEND_EASE;
-      if (Math.abs(currentBend) < 0.0001) currentBend = 0;
+      // Tension: driven by velocity, signed for direction
+      // Normalized so TENSION_MAX = 1.0 at ~80px/frame velocity
+      const rawSpeed = isDragging ? dragVel * 6 : velocity;
+      targetTension = Math.max(-TENSION_MAX, Math.min(TENSION_MAX, rawSpeed / 80));
+
+      // Damped spring return — premium, not bouncy
+      currentTension += (targetTension - currentTension) * TENSION_EASE;
+      if (Math.abs(currentTension) < 0.0002) currentTension = 0;
 
       layout();
 
-      // Hover
+      // Hover detection
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
       const newHovered = hits.length > 0 ? hits[0].object.userData.index : -1;
@@ -265,7 +278,7 @@ export default function WorkSlider() {
           const item = cards[hoveredIndex]?.item;
           if (item) {
             const num = String(hoveredIndex + 1).padStart(3, '0');
-            if (numEl)    { numEl.textContent = num; numEl.style.opacity = '1'; }
+            if (numEl)    { numEl.textContent    = num; numEl.style.opacity = '1'; }
             if (clientEl) { clientEl.textContent = item.client || item.name || ''; clientEl.style.opacity = '1'; }
           }
         } else {
@@ -277,6 +290,7 @@ export default function WorkSlider() {
       renderer.render(scene, camera);
     }
 
+    // ── Events ────────────────────────────────────────────────────────────────
     const onWheel = (e) => {
       e.preventDefault();
       isSnapping = false;
@@ -306,7 +320,7 @@ export default function WorkSlider() {
     const onMouseUp = () => {
       if (!isDragging) return;
       isDragging = false;
-      velocity = Math.max(-80, Math.min(80, dragVel * 6));
+      velocity = Math.max(-80, Math.min(80, dragVel * 5));
       renderer.domElement.style.cursor = 'grab';
       snapTimer = setTimeout(snapToCenter, 400);
     };
@@ -319,9 +333,22 @@ export default function WorkSlider() {
     };
 
     let tX = 0, tLX = 0, tV = 0, tOS = 0;
-    const onTouchStart = (e) => { isDragging = true; isSnapping = false; clearTimeout(snapTimer); tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
-    const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
-    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); snapTimer = setTimeout(snapToCenter, 400); };
+    const onTouchStart = (e) => {
+      isDragging = true; isSnapping = false; clearTimeout(snapTimer);
+      tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0;
+    };
+    const onTouchMove = (e) => {
+      if (!isDragging) return; e.preventDefault();
+      const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI;
+      tV = -dx;
+      offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI;
+      tLX = e.touches[0].clientX;
+    };
+    const onTouchEnd = () => {
+      isDragging = false;
+      velocity = Math.max(-80, Math.min(80, tV * 5));
+      snapTimer = setTimeout(snapToCenter, 400);
+    };
 
     const onResize = () => {
       const W2 = window.innerWidth, H2 = window.innerHeight;
