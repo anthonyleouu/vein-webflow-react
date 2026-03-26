@@ -5,7 +5,7 @@ const CARD_W        = 1246;
 const CARD_H        = 700;
 const GAP           = 256;
 const STEP          = CARD_W + GAP;
-const CIRCLE_R      = 1800;
+const CIRCLE_R      = 1200;
 const STRETCH_MAX   = 1.25;
 const STRETCH_EASE  = 0.055;
 const MOMENTUM_DECAY = 0.87;
@@ -67,7 +67,7 @@ export default function WorkSlider() {
     // Camera pulled back further to see the arc depth
     // Slightly elevated (positive Y) to look slightly down at the arc
     const camZ = H / (2 * Math.tan(vFov / 2)) * 1.15;
-    const camY = 80;
+    const camY = 0;
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -83,7 +83,7 @@ export default function WorkSlider() {
 
     const scene  = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(fov, W / H, 1, 20000);
-    camera.position.set(0, camY, camZ);
+    camera.position.set(0, 0, camZ);
     camera.lookAt(0, 0, 0);
 
     function createCard(item) {
@@ -160,7 +160,7 @@ export default function WorkSlider() {
         card.mesh.position.x = Math.sin(angle) * CIRCLE_R;
         card.mesh.position.z = Math.cos(angle) * CIRCLE_R - CIRCLE_R;
         card.mesh.position.y = 0;
-        card.mesh.rotation.y = -angle;
+        const rotDamp = Math.min(Math.abs(angle) * 2.5, 1.0); card.mesh.rotation.y = -angle * rotDamp;
 
         // Stretch
         card.mat.uniforms.uStretch.value = stretch;
@@ -294,7 +294,7 @@ export default function WorkSlider() {
       const W2 = window.innerWidth, H2 = window.innerHeight;
       renderer.setSize(W2, H2);
       camera.aspect = W2 / H2;
-      camera.position.set(0, camY, H2 / (2 * Math.tan(vFov / 2)) * 1.15);
+      camera.position.set(0, 0, H2 / (2 * Math.tan(vFov / 2)) * 1.15);
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
     };
