@@ -1,73 +1,72 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-// ── Constants ──────────────────────────────────────────────────────────────────
 const CARD_W         = 1246;
 const CARD_H         = 700;
 const GAP            = 256;
 const STEP           = CARD_W + GAP;
 const SEGMENTS_X     = 32;
-const SEGMENTS_Y     = 32;
-const BEND_MAX       = 1.0;
-const BEND_EASE      = 0.018;   // ~1.5s spring back
+const SEGMENTS_Y     = 20;
+const BEND_MAX       = 0.6;
+const BEND_EASE      = 0.018;
 const MOMENTUM_DECAY = 0.92;
 const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.55;
 const BG_COLOR       = 0xfffdfc;
 
-// Side cards scale — 65% visible
-const SIDE_SCALE     = 0.68;
-
-// Vertex shader:
-// uBend    = global bend intensity (from scroll speed)
-// uSide    = -1 (left card), 0 (center), 1 (right card)
-// Outer edge curves a lot, inner edge curves a little
+// Asymmetric bend:
+// uBend = signed bend intensity
+// uOffsetX = card's rawX position (negative = left of center, positive = right)
+// Outer edge bends more, inner edge bends less
 const vertexShader = `
   uniform float uBend;
-  uniform float uSide;
+  uniform float uOffsetX;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vec3 pos = position;
 
-    float halfW = ${(CARD_W * 0.5).toFixed(1)};
-    float halfH = ${(CARD_H * 0.5).toFixed(1)};
+    float halfW  = ${(CARD_W * 0.5).toFixed(1)};
+    float halfH  = ${(CARD_H * 0.5).toFixed(1)};
+    float nx     = pos.x / halfW;   // -1 to +1 across card width
+    float ny     = pos.y / halfH;   // -1 to +1 across card height
 
-    // nx: -1 (left edge) to +1 (right edge)
-    float nx = pos.x / halfW;
-    // ny: -1 (bottom) to +1 (top)
-    float ny = pos.y / halfH;
+    // Which side of center is this card on?
+    // cardSide: -1 = left of center, 0 = at center, +1 = right of center
+    float cardSide = sign(uOffsetX);
 
-    float bend = 0.0;
+    // For a card to the LEFT (cardSide = -1):
+    //   left edge  (nx = -1) is the OUTER edge → bends a lot
+    //   right edge (nx = +1) is the INNER edge → bends a little
+    // For a card to the RIGHT (cardSide = +1):
+    //   right edge (nx = +1) is the OUTER edge → bends a lot
+    //   left edge  (nx = -1) is the INNER edge → bends a little
+    // For CENTER card (cardSide = 0): symmetric
 
-    if (uSide == 0.0) {
-      // CENTER card: symmetric gentle bend — both edges curve equally
-      bend = (nx * nx) * uBend * 180.0;
+    float outerStrength = 1.0;
+    float innerStrength = 0.12;
+
+    // t: how "outer" is this vertex? 0 = inner edge, 1 = outer edge
+    float t;
+    if (abs(cardSide) < 0.1) {
+      // center card: symmetric — both edges equal
+      t = 0.5;
     } else {
-      // SIDE cards: asymmetric bend
-      // Inner edge (toward center) = slight bend
-      // Outer edge (away from center) = strong bend
-      // uSide = -1 means card is to the LEFT of center
-      //   → left edge is OUTER (strong), right edge is INNER (slight)
-      // uSide = +1 means card is to the RIGHT of center
-      //   → right edge is OUTER (strong), left edge is INNER (slight)
-
-      // Map nx so outer edge = 1, inner edge = 0
-      float outerFactor = (nx * uSide + 1.0) * 0.5; // 0 at inner, 1 at outer
-
-      // Slight bend at inner edge, strong at outer
-      float innerBend = 0.08;
-      float outerBend = 1.0;
-      float bendFactor = mix(innerBend, outerBend, outerFactor * outerFactor);
-
-      bend = bendFactor * uBend * 320.0;
+      // nx goes -1 to +1
+      // if cardSide = -1: outer is at nx=-1, inner at nx=+1
+      //   → t = (-nx + 1) / 2 ... wait, we want t=1 when nx=-1
+      //   → t = (1.0 - nx * cardSide) / 2.0 ... 
+      // simpler: t = (1.0 + nx * (-cardSide)) * 0.5
+      t = (1.0 + nx * (-cardSide)) * 0.5;
     }
 
+    float strength = mix(innerStrength, outerStrength, t * t);
+    float bend = strength * uBend * 200.0;
     pos.z += bend;
 
-    // Vertical barrel: top/bottom push forward slightly
-    pos.z += (ny * ny) * abs(uBend) * 60.0;
+    // Subtle vertical barrel — always present when bending
+    pos.z += (ny * ny) * abs(uBend) * 50.0;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -100,13 +99,13 @@ export default function WorkSlider() {
     let dragVel      = 0;
     let animId       = null;
     let hoveredIndex = -1;
+    let snapTimer    = null;
     let isSnapping   = false;
     let snapTarget   = 0;
-    let snapTimer    = null;
 
     const numEl    = document.getElementById('work-number');
     const clientEl = document.getElementById('work-client');
-    if (numEl)    { numEl.style.opacity    = '0'; numEl.style.transition = 'opacity 0.2s'; }
+    if (numEl)    { numEl.style.opacity = '0'; numEl.style.transition = 'opacity 0.2s'; }
     if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.2s'; }
 
     const W    = window.innerWidth;
@@ -116,8 +115,7 @@ export default function WorkSlider() {
     const camZ = H / (2 * Math.tan(vFov / 2));
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
+      antialias: true, alpha: false,
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -137,20 +135,18 @@ export default function WorkSlider() {
 
     function createCard(item, index) {
       const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS_X, SEGMENTS_Y);
-
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
       c.getContext('2d').fillStyle = '#999';
       c.getContext('2d').fillRect(0, 0, 4, 4);
 
       const mat = new THREE.ShaderMaterial({
-        vertexShader,
-        fragmentShader,
+        vertexShader, fragmentShader,
         uniforms: {
-          uTexture: { value: new THREE.CanvasTexture(c) },
-          uBend:    { value: 0.0 },
-          uSide:    { value: 0.0 },
-          uOpacity: { value: 1.0 },
+          uTexture:  { value: new THREE.CanvasTexture(c) },
+          uBend:     { value: 0.0 },
+          uOffsetX:  { value: 0.0 },
+          uOpacity:  { value: 1.0 },
         },
         transparent: false,
         side: THREE.FrontSide,
@@ -205,25 +201,10 @@ export default function WorkSlider() {
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
 
-        // Determine side: -1 left, 0 center, 1 right
-        // Center = closest to 0
-        const absX = Math.abs(rawX);
-        let side = 0;
-        if (rawX < -STEP * 0.3) side = -1;  // to the left
-        else if (rawX > STEP * 0.3) side = 1; // to the right
-
-        // Scale: center = 1.0, sides = SIDE_SCALE
-        const isCenter = absX < STEP * 0.3;
-        const targetScale = isCenter ? 1.0 : SIDE_SCALE;
-        const curScale = card.mesh.scale.x;
-        const newScale = curScale + (targetScale - curScale) * 0.08;
-        card.mesh.scale.set(newScale, newScale, 1);
-
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
-
-        card.mat.uniforms.uBend.value = currentBend;
-        card.mat.uniforms.uSide.value = side;
+        card.mat.uniforms.uBend.value    = currentBend;
+        card.mat.uniforms.uOffsetX.value = rawX;
       });
     }
 
@@ -268,7 +249,7 @@ export default function WorkSlider() {
       }
 
       const spd = isDragging ? dragVel * 8 : velocity;
-      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.007));
+      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.006));
       currentBend += (targetBend - currentBend) * BEND_EASE;
       if (Math.abs(currentBend) < 0.0001) currentBend = 0;
 
@@ -284,7 +265,7 @@ export default function WorkSlider() {
           const item = cards[hoveredIndex]?.item;
           if (item) {
             const num = String(hoveredIndex + 1).padStart(3, '0');
-            if (numEl)    { numEl.textContent    = num; numEl.style.opacity = '1'; }
+            if (numEl)    { numEl.textContent = num; numEl.style.opacity = '1'; }
             if (clientEl) { clientEl.textContent = item.client || item.name || ''; clientEl.style.opacity = '1'; }
           }
         } else {
@@ -301,7 +282,7 @@ export default function WorkSlider() {
       isSnapping = false;
       clearTimeout(snapTimer);
       velocity = Math.max(-80, Math.min(80, velocity + e.deltaY * WHEEL_MULTI));
-      snapTimer = setTimeout(snapToCenter, 300);
+      snapTimer = setTimeout(snapToCenter, 400);
     };
 
     const onMouseDown = (e) => {
@@ -327,7 +308,7 @@ export default function WorkSlider() {
       isDragging = false;
       velocity = Math.max(-80, Math.min(80, dragVel * 6));
       renderer.domElement.style.cursor = 'grab';
-      snapTimer = setTimeout(snapToCenter, 300);
+      snapTimer = setTimeout(snapToCenter, 400);
     };
 
     const onMouseLeave = () => {
@@ -340,7 +321,7 @@ export default function WorkSlider() {
     let tX = 0, tLX = 0, tV = 0, tOS = 0;
     const onTouchStart = (e) => { isDragging = true; isSnapping = false; clearTimeout(snapTimer); tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
     const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
-    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); snapTimer = setTimeout(snapToCenter, 300); };
+    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); snapTimer = setTimeout(snapToCenter, 400); };
 
     const onResize = () => {
       const W2 = window.innerWidth, H2 = window.innerHeight;
