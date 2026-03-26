@@ -146,22 +146,35 @@ export default function WorkSlider() {
 
       // Video texture
       const video = document.createElement('video');
-      video.src = item.videoUrl;
-      video.muted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.crossOrigin = 'anonymous';
-      video.play().catch(() => {});
+video.muted = true;
+video.loop = true;
+video.playsInline = true;
+video.crossOrigin = 'anonymous';
 
-      const onMeta = () => {
-        const tex = new THREE.VideoTexture(video);
-        tex.minFilter = THREE.LinearFilter;
-        tex.magFilter = THREE.LinearFilter;
-        material.uniforms.uTexture.value = tex;
-        material.transparent = false;
-      };
-      if (video.readyState >= 1) onMeta();
-      else video.addEventListener('loadedmetadata', onMeta, { once: true });
+if (video.canPlayType('application/vnd.apple.mpegurl')) {
+  video.src = item.videoUrl;
+  video.play().catch(() => {});
+} else if (window.Hls && window.Hls.isSupported()) {
+  const hls = new window.Hls({ enableWorker: false });
+  hls.loadSource(item.videoUrl);
+  hls.attachMedia(video);
+  hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+    video.play().catch(() => {});
+  });
+} else {
+  video.src = item.videoUrl;
+  video.play().catch(() => {});
+}
+
+const onMeta = () => {
+  const tex = new THREE.VideoTexture(video);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  material.uniforms.uTexture.value = tex;
+  material.transparent = false;
+};
+if (video.readyState >= 1) onMeta();
+else video.addEventListener('loadedmetadata', onMeta, { once: true });
 
       return { mesh, material, video, item, index };
     }
