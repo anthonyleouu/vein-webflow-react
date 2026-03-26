@@ -1,20 +1,41 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-// ── Constants ──────────────────────────────────────────────────────────────────
 const CARD_W         = 1246;
 const CARD_H         = 700;
 const GAP            = 256;
 const STEP           = CARD_W + GAP;
-const CIRCLE_R       = 2200;   // resting arc radius
-const CIRCLE_R_MIN   = 1400;   // tightest arc (at max scroll speed)
-const STRETCH_MAX    = 1.2;    // max horizontal stretch
-const STRETCH_EASE   = 0.06;
-const ARC_EASE       = 0.06;   // how fast arc tightens/relaxes
-const MOMENTUM_DECAY = 0.91;
+const SEGMENTS       = 20;      // horizontal segments for bending
+const BEND_MAX       = 0.55;    // max bend amount (radians-ish)
+const BEND_EASE      = 0.032;   // how slowly bend relaxes (lower = slower spring back)
+const MOMENTUM_DECAY = 0.92;
 const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.55;
 const BG_COLOR       = 0xfffdfc;
+
+// Vertex shader — bends the card horizontally based on uBend
+// The bend is a sinusoidal curve: edges curve forward/back, center stays flat
+const vertexShader = `
+  uniform float uBend;
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    vec3 pos = position;
+
+    // Normalize x to [-1, 1]
+    float nx = pos.x / (${CARD_W.toFixed(1)} * 0.5);
+
+    // Bend: push Z forward at edges based on uBend
+    // sin curve: 0 at center, max at edges
+    pos.z += sin(nx * 3.14159) * uBend * ${(CARD_W * 0.18).toFixed(1)};
+
+    // Slight vertical pinch at edges to complete the paper feel
+    pos.y *= 1.0 - abs(nx) * abs(uBend) * 0.08;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`;
 
 const fragmentShader = `
   uniform sampler2D uTexture;
@@ -26,46 +47,32 @@ const fragmentShader = `
   }
 `;
 
-const vertexShader = `
-  uniform float uStretch;
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    vec3 pos = position;
-    pos.x *= uStretch;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-  }
-`;
-
 export default function WorkSlider() {
   useEffect(() => {
     const container = document.getElementById('work-slider-root');
     if (!container) return;
 
-    let cards      = [];
-    let offset     = 0;
-    let velocity   = 0;
-    let stretch    = 1;
-    let arcR       = CIRCLE_R;  // current arc radius (animated)
-    let isDragging = false;
-    let dragStartX = 0;
+    let cards        = [];
+    let offset       = 0;
+    let velocity     = 0;
+    let targetBend   = 0;   // bend we want based on velocity
+    let currentBend  = 0;   // current animated bend
+    let isDragging   = false;
+    let dragStartX   = 0;
     let dragOffsetStart = 0;
-    let lastDragX  = 0;
-    let dragVel    = 0;
-    let animId     = null;
+    let lastDragX    = 0;
+    let dragVel      = 0;
+    let animId       = null;
     let hoveredIndex = -1;
 
-    // DOM info elements
     const numEl    = document.getElementById('work-number');
     const clientEl = document.getElementById('work-client');
-
-    // Hide info initially
-    if (numEl)    { numEl.style.opacity = '0'; numEl.style.transition = 'opacity 0.2s'; }
+    if (numEl)    { numEl.style.opacity    = '0'; numEl.style.transition    = 'opacity 0.2s'; }
     if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.2s'; }
 
-    const W   = window.innerWidth;
-    const H   = window.innerHeight;
-    const fov = 50;
+    const W    = window.innerWidth;
+    const H    = window.innerHeight;
+    const fov  = 50;
     const vFov = (fov * Math.PI) / 180;
     const camZ = H / (2 * Math.tan(vFov / 2));
 
@@ -86,12 +93,12 @@ export default function WorkSlider() {
     camera.position.set(0, 0, camZ);
     camera.lookAt(0, 0, 0);
 
-    // Raycaster for hover
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2(-9999, -9999);
 
     function createCard(item, index) {
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, 1, 1);
+      // More horizontal segments for smooth bend curve
+      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS, 1);
 
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
@@ -103,7 +110,7 @@ export default function WorkSlider() {
         fragmentShader,
         uniforms: {
           uTexture: { value: new THREE.CanvasTexture(c) },
-          uStretch: { value: 1.0 },
+          uBend:    { value: 0.0 },
           uOpacity: { value: 1.0 },
         },
         transparent: false,
@@ -159,12 +166,12 @@ export default function WorkSlider() {
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
 
-        const angle = rawX / arcR;
-        card.mesh.position.x = Math.sin(angle) * arcR;
-        card.mesh.position.z = Math.cos(angle) * arcR - arcR;
-        card.mesh.position.y = 0;
-        card.mesh.rotation.y = -angle;
-        card.mat.uniforms.uStretch.value = stretch;
+        // Flat horizontal positioning — no rotation, no arc
+        card.mesh.position.set(rawX, 0, 0);
+        card.mesh.rotation.set(0, 0, 0);
+
+        // Apply same bend to all cards
+        card.mat.uniforms.uBend.value = currentBend;
       });
     }
 
@@ -177,20 +184,17 @@ export default function WorkSlider() {
         if (Math.abs(velocity) < 0.01) velocity = 0;
       }
 
-      // Speed drives both stretch and arc tightening
-      const spd = Math.abs(isDragging ? dragVel * 8 : velocity);
-      const tStretch = spd > 1 ? 1 + Math.min(spd * 0.0009, STRETCH_MAX - 1) : 1.0;
-      stretch += (tStretch - stretch) * STRETCH_EASE;
+      // Bend target: based on current speed, direction-aware
+      const spd = isDragging ? dragVel * 8 : velocity;
+      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.006));
 
-      // Arc tightens when scrolling fast, relaxes to CIRCLE_R when stopped
-      const tArcR = spd > 1
-        ? CIRCLE_R - Math.min(spd * 0.8, CIRCLE_R - CIRCLE_R_MIN)
-        : CIRCLE_R;
-      arcR += (tArcR - arcR) * ARC_EASE;
+      // Slow spring back to 0
+      currentBend += (targetBend - currentBend) * BEND_EASE;
+      if (Math.abs(currentBend) < 0.0001) currentBend = 0;
 
       layout();
 
-      // Hover detection
+      // Hover
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
       const newHovered = hits.length > 0 ? hits[0].object.userData.index : -1;
@@ -201,11 +205,11 @@ export default function WorkSlider() {
           const item = cards[hoveredIndex]?.item;
           if (item) {
             const num = String(hoveredIndex + 1).padStart(3, '0');
-            if (numEl)    { numEl.textContent = num; numEl.style.opacity = '1'; }
+            if (numEl)    { numEl.textContent    = num;                          numEl.style.opacity    = '1'; }
             if (clientEl) { clientEl.textContent = item.client || item.name || ''; clientEl.style.opacity = '1'; }
           }
         } else {
-          if (numEl)    numEl.style.opacity = '0';
+          if (numEl)    numEl.style.opacity    = '0';
           if (clientEl) clientEl.style.opacity = '0';
         }
       }
@@ -216,23 +220,19 @@ export default function WorkSlider() {
     // ── Events ────────────────────────────────────────────────────────────
     const onWheel = (e) => {
       e.preventDefault();
-      velocity = Math.max(-60, Math.min(60, velocity + e.deltaY * WHEEL_MULTI));
+      velocity = Math.max(-80, Math.min(80, velocity + e.deltaY * WHEEL_MULTI));
     };
 
     const onMouseDown = (e) => {
       isDragging = true;
-      dragStartX = e.clientX;
-      dragOffsetStart = offset;
-      lastDragX = e.clientX;
-      dragVel = 0;
+      dragStartX = e.clientX; dragOffsetStart = offset;
+      lastDragX = e.clientX; dragVel = 0;
       renderer.domElement.style.cursor = 'grabbing';
     };
 
     const onMouseMove = (e) => {
-      // Update mouse for raycaster
       mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
       if (!isDragging) return;
       const dx = (e.clientX - lastDragX) * DRAG_MULTI;
       dragVel = -dx;
@@ -243,34 +243,21 @@ export default function WorkSlider() {
     const onMouseUp = () => {
       if (!isDragging) return;
       isDragging = false;
-      velocity = Math.max(-60, Math.min(60, dragVel * 6));
+      velocity = Math.max(-80, Math.min(80, dragVel * 6));
       renderer.domElement.style.cursor = 'grab';
     };
 
     const onMouseLeave = () => {
       mouse.set(-9999, -9999);
-      if (numEl)    numEl.style.opacity = '0';
+      if (numEl)    numEl.style.opacity    = '0';
       if (clientEl) clientEl.style.opacity = '0';
       hoveredIndex = -1;
     };
 
     let tX = 0, tLX = 0, tV = 0, tOS = 0;
-    const onTouchStart = (e) => {
-      isDragging = true;
-      tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0;
-    };
-    const onTouchMove = (e) => {
-      if (!isDragging) return;
-      e.preventDefault();
-      const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI;
-      tV = -dx;
-      offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI;
-      tLX = e.touches[0].clientX;
-    };
-    const onTouchEnd = () => {
-      isDragging = false;
-      velocity = Math.max(-60, Math.min(60, tV * 6));
-    };
+    const onTouchStart = (e) => { isDragging = true; tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
+    const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
+    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); };
 
     const onResize = () => {
       const W2 = window.innerWidth, H2 = window.innerHeight;
