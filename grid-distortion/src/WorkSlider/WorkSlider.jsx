@@ -1,13 +1,12 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-// ── Constants ──────────────────────────────────────────────────────────────────
 const CARD_W        = 1246;
 const CARD_H        = 700;
 const GAP           = 256;
 const STEP          = CARD_W + GAP;
-const CIRCLE_R      = 3200;   // radius of the imaginary circle cards sit on
-const STRETCH_MAX   = 1.22;   // max horizontal stretch on fast scroll
+const CIRCLE_R      = 1800;
+const STRETCH_MAX   = 1.25;
 const STRETCH_EASE  = 0.055;
 const MOMENTUM_DECAY = 0.87;
 const SNAP_EASE     = 0.068;
@@ -15,7 +14,6 @@ const DRAG_MULTI    = 1.3;
 const WHEEL_MULTI   = 0.5;
 const BG_COLOR      = 0xfffdfc;
 
-// Fragment shader — grayscale blend + opacity
 const fragmentShader = `
   uniform sampler2D uTexture;
   uniform float uGrayscale;
@@ -29,7 +27,6 @@ const fragmentShader = `
   }
 `;
 
-// Vertex shader — horizontal stretch only (arc done via mesh rotation)
 const vertexShader = `
   uniform float uStretch;
   varying vec2 vUv;
@@ -46,9 +43,8 @@ export default function WorkSlider() {
     const container = document.getElementById('work-slider-root');
     if (!container) return;
 
-    // ── state ────────────────────────────────────────────────────────────
     let cards        = [];
-    let offset       = 0;          // current scroll offset in px
+    let offset       = 0;
     let velocity     = 0;
     let stretch      = 1;
     let isDragging   = false;
@@ -63,12 +59,15 @@ export default function WorkSlider() {
     let snappedOnStop = false;
     let animId       = null;
 
-    // ── renderer ─────────────────────────────────────────────────────────
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const fov  = 50;
+    const W   = window.innerWidth;
+    const H   = window.innerHeight;
+    const fov = 52;
     const vFov = (fov * Math.PI) / 180;
-    const camZ = H / (2 * Math.tan(vFov / 2));
+
+    // Camera pulled back further to see the arc depth
+    // Slightly elevated (positive Y) to look slightly down at the arc
+    const camZ = H / (2 * Math.tan(vFov / 2)) * 1.15;
+    const camY = 80;
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -84,18 +83,17 @@ export default function WorkSlider() {
 
     const scene  = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(fov, W / H, 1, 20000);
-    camera.position.set(0, 0, camZ);
+    camera.position.set(0, camY, camZ);
     camera.lookAt(0, 0, 0);
 
-    // ── card factory ──────────────────────────────────────────────────────
-    function createCard(item, index) {
+    function createCard(item) {
       const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, 1, 1);
 
-      // placeholder
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
-      c.getContext('2d').fillStyle = '#999';
-      c.getContext('2d').fillRect(0,0,4,4);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#999';
+      ctx.fillRect(0, 0, 4, 4);
 
       const mat = new THREE.ShaderMaterial({
         vertexShader,
@@ -113,7 +111,6 @@ export default function WorkSlider() {
       const mesh = new THREE.Mesh(geo, mat);
       scene.add(mesh);
 
-      // video
       const vid = document.createElement('video');
       vid.muted = true; vid.loop = true;
       vid.playsInline = true; vid.crossOrigin = 'anonymous';
@@ -130,58 +127,51 @@ export default function WorkSlider() {
       if (vid.canPlayType('application/vnd.apple.mpegurl')) {
         vid.src = item.videoUrl;
         vid.addEventListener('loadedmetadata', applyTex, { once: true });
-        vid.play().catch(()=>{});
+        vid.play().catch(() => {});
       } else if (window.Hls && window.Hls.isSupported()) {
         const hls = new window.Hls({ enableWorker: false, maxBufferLength: 10 });
         hls.loadSource(item.videoUrl);
         hls.attachMedia(vid);
         hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-          vid.play().catch(()=>{});
+          vid.play().catch(() => {});
           applyTex();
         });
       } else {
         vid.src = item.videoUrl;
         vid.addEventListener('loadedmetadata', applyTex, { once: true });
-        vid.play().catch(()=>{});
+        vid.play().catch(() => {});
       }
 
-      return { mesh, mat, vid, item, index };
+      return { mesh, mat, vid, item };
     }
 
-    // ── layout — position + rotate each card on the circle ───────────────
     function layout() {
       const total = cards.length;
       if (!total) return;
       const bandW = total * STEP;
 
       cards.forEach((card, i) => {
-        // wrap offset so cards loop
         let rawX = i * STEP - offset;
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
 
-        // angle on circle: how far from center in radians
+        // Arc: place card on circle surface
         const angle = rawX / CIRCLE_R;
-
-        // position on circle arc
         card.mesh.position.x = Math.sin(angle) * CIRCLE_R;
-        card.mesh.position.z = Math.cos(angle) * CIRCLE_R - CIRCLE_R; // center at z=0
+        card.mesh.position.z = Math.cos(angle) * CIRCLE_R - CIRCLE_R;
         card.mesh.position.y = 0;
-
-        // face toward camera (tangent to circle)
         card.mesh.rotation.y = -angle;
 
-        // stretch uniform
+        // Stretch
         card.mat.uniforms.uStretch.value = stretch;
 
-        // grayscale — center card full color, others desaturated
+        // Grayscale
         const isCenter = Math.abs(rawX) < STEP * 0.55;
         const gCur = card.mat.uniforms.uGrayscale.value;
-        card.mat.uniforms.uGrayscale.value += ((isCenter ? 0.0 : 0.6) - gCur) * 0.07;
+        card.mat.uniforms.uGrayscale.value += ((isCenter ? 0.0 : 0.65) - gCur) * 0.07;
       });
     }
 
-    // ── find center card ──────────────────────────────────────────────────
     function getCenter() {
       const total = cards.length;
       if (!total) return 0;
@@ -196,7 +186,6 @@ export default function WorkSlider() {
       return best;
     }
 
-    // ── update DOM text ───────────────────────────────────────────────────
     function updateInfo(idx) {
       if (idx === activeIndex) return;
       activeIndex = idx;
@@ -215,7 +204,6 @@ export default function WorkSlider() {
       fade(clientEl, item.client || item.name || '');
     }
 
-    // ── snap ──────────────────────────────────────────────────────────────
     function snap() {
       const total = cards.length;
       if (!total) return;
@@ -233,14 +221,17 @@ export default function WorkSlider() {
       snappedOnStop = true;
     }
 
-    // ── render loop ───────────────────────────────────────────────────────
     function animate() {
       animId = requestAnimationFrame(animate);
 
       if (isSnapping) {
         const d = targetOffset - offset;
         offset += d * SNAP_EASE;
-        if (Math.abs(d) < 0.25) { offset = targetOffset; isSnapping = false; velocity = 0; }
+        if (Math.abs(d) < 0.25) {
+          offset = targetOffset;
+          isSnapping = false;
+          velocity = 0;
+        }
       } else if (!isDragging) {
         velocity *= MOMENTUM_DECAY;
         offset += velocity;
@@ -250,9 +241,11 @@ export default function WorkSlider() {
         }
       }
 
-      // stretch based on speed
+      // Stretch — triggers at low speed threshold
       const spd = Math.abs(isDragging ? dragVel * 8 : velocity);
-      const tStretch = spd > 4 ? 1 + Math.min(spd * 0.0007, STRETCH_MAX - 1) : 1.0;
+      const tStretch = spd > 1.5
+        ? 1 + Math.min(spd * 0.001, STRETCH_MAX - 1)
+        : 1.0;
       stretch += (tStretch - stretch) * STRETCH_EASE;
 
       layout();
@@ -260,11 +253,10 @@ export default function WorkSlider() {
       renderer.render(scene, camera);
     }
 
-    // ── events ────────────────────────────────────────────────────────────
     const onWheel = (e) => {
       e.preventDefault();
       isSnapping = false; snappedOnStop = false;
-      velocity = Math.max(-45, Math.min(45, velocity + e.deltaY * WHEEL_MULTI));
+      velocity = Math.max(-50, Math.min(50, velocity + e.deltaY * WHEEL_MULTI));
       clearTimeout(snapTimer);
       snapTimer = setTimeout(snap, 220);
     };
@@ -287,7 +279,7 @@ export default function WorkSlider() {
     const onMouseUp = () => {
       if (!isDragging) return;
       isDragging = false;
-      velocity = Math.max(-45, Math.min(45, dragVel * 6));
+      velocity = Math.max(-50, Math.min(50, dragVel * 6));
       renderer.domElement.style.cursor = 'grab';
       clearTimeout(snapTimer);
       snapTimer = setTimeout(snap, 220);
@@ -296,13 +288,14 @@ export default function WorkSlider() {
     let tX = 0, tLX = 0, tV = 0, tOS = 0;
     const onTouchStart = (e) => { isDragging = true; isSnapping = false; snappedOnStop = false; tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
     const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
-    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-45, Math.min(45, tV * 6)); clearTimeout(snapTimer); snapTimer = setTimeout(snap, 220); };
+    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-50, Math.min(50, tV * 6)); clearTimeout(snapTimer); snapTimer = setTimeout(snap, 220); };
 
     const onResize = () => {
       const W2 = window.innerWidth, H2 = window.innerHeight;
       renderer.setSize(W2, H2);
       camera.aspect = W2 / H2;
-      camera.position.z = H2 / (2 * Math.tan(vFov / 2));
+      camera.position.set(0, camY, H2 / (2 * Math.tan(vFov / 2)) * 1.15);
+      camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
     };
 
@@ -316,18 +309,16 @@ export default function WorkSlider() {
     window.addEventListener             ('resize',     onResize);
     renderer.domElement.style.cursor = 'grab';
 
-    // ── fetch & boot ──────────────────────────────────────────────────────
     fetch('https://vein-webflow-react.vercel.app/api/work')
       .then(r => r.json())
       .then(data => {
-        cards = (data.items || []).map((item, i) => createCard(item, i));
+        cards = (data.items || []).map(item => createCard(item));
         activeIndex = -1;
         updateInfo(0);
         animate();
       })
       .catch(() => animate());
 
-    // ── cleanup ───────────────────────────────────────────────────────────
     return () => {
       cancelAnimationFrame(animId);
       clearTimeout(snapTimer);
