@@ -1,40 +1,73 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
+// ── Constants ──────────────────────────────────────────────────────────────────
 const CARD_W         = 1246;
 const CARD_H         = 700;
 const GAP            = 256;
 const STEP           = CARD_W + GAP;
-const SEGMENTS       = 20;      // horizontal segments for bending
-const SEGMENTS_Y     = 20;      // vertical segments for barrel effect
-const BEND_MAX       = 0.55;    // max bend amount (radians-ish)
+const SEGMENTS_X     = 32;
+const SEGMENTS_Y     = 32;
+const BEND_MAX       = 1.0;
 const BEND_EASE      = 0.018;   // ~1.5s spring back
 const MOMENTUM_DECAY = 0.92;
 const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.55;
 const BG_COLOR       = 0xfffdfc;
 
-// Vertex shader — bends the card horizontally based on uBend
-// The bend is a sinusoidal curve: edges curve forward/back, center stays flat
+// Side cards scale — 65% visible
+const SIDE_SCALE     = 0.68;
+
+// Vertex shader:
+// uBend    = global bend intensity (from scroll speed)
+// uSide    = -1 (left card), 0 (center), 1 (right card)
+// Outer edge curves a lot, inner edge curves a little
 const vertexShader = `
   uniform float uBend;
+  uniform float uSide;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vec3 pos = position;
 
-    // Normalize x to [-1, 1]
-    float nx = pos.x / (${CARD_W.toFixed(1)} * 0.5);
+    float halfW = ${(CARD_W * 0.5).toFixed(1)};
+    float halfH = ${(CARD_H * 0.5).toFixed(1)};
 
-    // Parabolic curve: zero at center, max at left/right edges
-    
-    // Horizontal: left/right edges push forward (parabolic on X)
-    pos.z += (nx * nx) * uBend * 274.0;
-    // Vertical barrel: top/bottom push forward, middle stays back
-    float ny = pos.y / (700.0 * 0.5);
-    pos.z += (ny * ny) * abs(uBend) * 180.0;
+    // nx: -1 (left edge) to +1 (right edge)
+    float nx = pos.x / halfW;
+    // ny: -1 (bottom) to +1 (top)
+    float ny = pos.y / halfH;
 
+    float bend = 0.0;
+
+    if (uSide == 0.0) {
+      // CENTER card: symmetric gentle bend — both edges curve equally
+      bend = (nx * nx) * uBend * 180.0;
+    } else {
+      // SIDE cards: asymmetric bend
+      // Inner edge (toward center) = slight bend
+      // Outer edge (away from center) = strong bend
+      // uSide = -1 means card is to the LEFT of center
+      //   → left edge is OUTER (strong), right edge is INNER (slight)
+      // uSide = +1 means card is to the RIGHT of center
+      //   → right edge is OUTER (strong), left edge is INNER (slight)
+
+      // Map nx so outer edge = 1, inner edge = 0
+      float outerFactor = (nx * uSide + 1.0) * 0.5; // 0 at inner, 1 at outer
+
+      // Slight bend at inner edge, strong at outer
+      float innerBend = 0.08;
+      float outerBend = 1.0;
+      float bendFactor = mix(innerBend, outerBend, outerFactor * outerFactor);
+
+      bend = bendFactor * uBend * 320.0;
+    }
+
+    pos.z += bend;
+
+    // Vertical barrel: top/bottom push forward slightly
+    pos.z += (ny * ny) * abs(uBend) * 60.0;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -58,8 +91,8 @@ export default function WorkSlider() {
     let cards        = [];
     let offset       = 0;
     let velocity     = 0;
-    let targetBend   = 0;   // bend we want based on velocity
-    let currentBend  = 0;   // current animated bend
+    let targetBend   = 0;
+    let currentBend  = 0;
     let isDragging   = false;
     let dragStartX   = 0;
     let dragOffsetStart = 0;
@@ -67,10 +100,13 @@ export default function WorkSlider() {
     let dragVel      = 0;
     let animId       = null;
     let hoveredIndex = -1;
+    let isSnapping   = false;
+    let snapTarget   = 0;
+    let snapTimer    = null;
 
     const numEl    = document.getElementById('work-number');
     const clientEl = document.getElementById('work-client');
-    if (numEl)    { numEl.style.opacity    = '0'; numEl.style.transition    = 'opacity 0.2s'; }
+    if (numEl)    { numEl.style.opacity    = '0'; numEl.style.transition = 'opacity 0.2s'; }
     if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.2s'; }
 
     const W    = window.innerWidth;
@@ -100,8 +136,7 @@ export default function WorkSlider() {
     const mouse = new THREE.Vector2(-9999, -9999);
 
     function createCard(item, index) {
-      // More horizontal segments for smooth bend curve
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS, SEGMENTS_Y);
+      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS_X, SEGMENTS_Y);
 
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
@@ -114,6 +149,7 @@ export default function WorkSlider() {
         uniforms: {
           uTexture: { value: new THREE.CanvasTexture(c) },
           uBend:    { value: 0.0 },
+          uSide:    { value: 0.0 },
           uOpacity: { value: 1.0 },
         },
         transparent: false,
@@ -169,29 +205,70 @@ export default function WorkSlider() {
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
 
-        // Flat horizontal positioning — no rotation, no arc
+        // Determine side: -1 left, 0 center, 1 right
+        // Center = closest to 0
+        const absX = Math.abs(rawX);
+        let side = 0;
+        if (rawX < -STEP * 0.3) side = -1;  // to the left
+        else if (rawX > STEP * 0.3) side = 1; // to the right
+
+        // Scale: center = 1.0, sides = SIDE_SCALE
+        const isCenter = absX < STEP * 0.3;
+        const targetScale = isCenter ? 1.0 : SIDE_SCALE;
+        const curScale = card.mesh.scale.x;
+        const newScale = curScale + (targetScale - curScale) * 0.08;
+        card.mesh.scale.set(newScale, newScale, 1);
+
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
 
-        // Apply same bend to all cards
         card.mat.uniforms.uBend.value = currentBend;
+        card.mat.uniforms.uSide.value = side;
       });
+    }
+
+    function getCenter() {
+      const total = cards.length;
+      if (!total) return 0;
+      const bandW = total * STEP;
+      let best = 0, bestD = Infinity;
+      cards.forEach((_, i) => {
+        let rawX = i * STEP - offset;
+        rawX = ((rawX % bandW) + bandW) % bandW;
+        if (rawX > bandW / 2) rawX -= bandW;
+        if (Math.abs(rawX) < bestD) { bestD = Math.abs(rawX); best = i; }
+      });
+      return best;
+    }
+
+    function snapToCenter() {
+      const total = cards.length;
+      if (!total) return;
+      const bandW = total * STEP;
+      const best = getCenter();
+      const diff = ((best * STEP - offset) % bandW + bandW) % bandW;
+      snapTarget = offset + (diff > bandW / 2 ? diff - bandW : diff);
+      isSnapping = true;
     }
 
     function animate() {
       animId = requestAnimationFrame(animate);
 
-      if (!isDragging) {
+      if (isSnapping) {
+        const d = snapTarget - offset;
+        offset += d * 0.06;
+        if (Math.abs(d) < 0.3) { offset = snapTarget; isSnapping = false; }
+      } else if (!isDragging) {
         velocity *= MOMENTUM_DECAY;
         offset += velocity;
-        if (Math.abs(velocity) < 0.01) velocity = 0;
+        if (Math.abs(velocity) < 0.05) {
+          velocity = 0;
+          snapToCenter();
+        }
       }
 
-      // Bend target: based on current speed, direction-aware
       const spd = isDragging ? dragVel * 8 : velocity;
-      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.006));
-
-      // Slow spring back to 0
+      targetBend = Math.max(-BEND_MAX, Math.min(BEND_MAX, spd * 0.007));
       currentBend += (targetBend - currentBend) * BEND_EASE;
       if (Math.abs(currentBend) < 0.0001) currentBend = 0;
 
@@ -201,18 +278,17 @@ export default function WorkSlider() {
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
       const newHovered = hits.length > 0 ? hits[0].object.userData.index : -1;
-
       if (newHovered !== hoveredIndex) {
         hoveredIndex = newHovered;
         if (hoveredIndex >= 0) {
           const item = cards[hoveredIndex]?.item;
           if (item) {
             const num = String(hoveredIndex + 1).padStart(3, '0');
-            if (numEl)    { numEl.textContent    = num;                          numEl.style.opacity    = '1'; }
+            if (numEl)    { numEl.textContent    = num; numEl.style.opacity = '1'; }
             if (clientEl) { clientEl.textContent = item.client || item.name || ''; clientEl.style.opacity = '1'; }
           }
         } else {
-          if (numEl)    numEl.style.opacity    = '0';
+          if (numEl)    numEl.style.opacity = '0';
           if (clientEl) clientEl.style.opacity = '0';
         }
       }
@@ -220,14 +296,17 @@ export default function WorkSlider() {
       renderer.render(scene, camera);
     }
 
-    // ── Events ────────────────────────────────────────────────────────────
     const onWheel = (e) => {
       e.preventDefault();
+      isSnapping = false;
+      clearTimeout(snapTimer);
       velocity = Math.max(-80, Math.min(80, velocity + e.deltaY * WHEEL_MULTI));
+      snapTimer = setTimeout(snapToCenter, 300);
     };
 
     const onMouseDown = (e) => {
-      isDragging = true;
+      isDragging = true; isSnapping = false;
+      clearTimeout(snapTimer);
       dragStartX = e.clientX; dragOffsetStart = offset;
       lastDragX = e.clientX; dragVel = 0;
       renderer.domElement.style.cursor = 'grabbing';
@@ -248,19 +327,20 @@ export default function WorkSlider() {
       isDragging = false;
       velocity = Math.max(-80, Math.min(80, dragVel * 6));
       renderer.domElement.style.cursor = 'grab';
+      snapTimer = setTimeout(snapToCenter, 300);
     };
 
     const onMouseLeave = () => {
       mouse.set(-9999, -9999);
-      if (numEl)    numEl.style.opacity    = '0';
+      if (numEl)    numEl.style.opacity = '0';
       if (clientEl) clientEl.style.opacity = '0';
       hoveredIndex = -1;
     };
 
     let tX = 0, tLX = 0, tV = 0, tOS = 0;
-    const onTouchStart = (e) => { isDragging = true; tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
+    const onTouchStart = (e) => { isDragging = true; isSnapping = false; clearTimeout(snapTimer); tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
     const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
-    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); };
+    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 6)); snapTimer = setTimeout(snapToCenter, 300); };
 
     const onResize = () => {
       const W2 = window.innerWidth, H2 = window.innerHeight;
@@ -291,6 +371,7 @@ export default function WorkSlider() {
 
     return () => {
       cancelAnimationFrame(animId);
+      clearTimeout(snapTimer);
       renderer.domElement.removeEventListener('wheel',      onWheel);
       renderer.domElement.removeEventListener('mousedown',  onMouseDown);
       window.removeEventListener             ('mousemove',  onMouseMove);
