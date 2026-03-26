@@ -6,8 +6,9 @@ const CARD_H         = 700;
 const GAP            = 256;
 const STEP           = CARD_W + GAP;
 const SEGMENTS       = 20;      // horizontal segments for bending
+const SEGMENTS_Y     = 20;      // vertical segments for barrel effect
 const BEND_MAX       = 0.55;    // max bend amount (radians-ish)
-const BEND_EASE      = 0.032;   // how slowly bend relaxes (lower = slower spring back)
+const BEND_EASE      = 0.018;   // ~1.5s spring back
 const MOMENTUM_DECAY = 0.92;
 const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.55;
@@ -28,7 +29,11 @@ const vertexShader = `
 
     // Parabolic curve: zero at center, max at left/right edges
     
+    // Horizontal: left/right edges push forward (parabolic on X)
     pos.z += (nx * nx) * uBend * 274.0;
+    // Vertical barrel: top/bottom push forward, middle stays back
+    float ny = pos.y / (700.0 * 0.5);
+    pos.z += (ny * ny) * abs(uBend) * 180.0;
 
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
@@ -96,7 +101,7 @@ export default function WorkSlider() {
 
     function createCard(item, index) {
       // More horizontal segments for smooth bend curve
-      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS, 1);
+      const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS, SEGMENTS_Y);
 
       const c = document.createElement('canvas');
       c.width = 4; c.height = 4;
