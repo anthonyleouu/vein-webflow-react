@@ -22,13 +22,9 @@ const WHEEL_MULTI    = 0.42;
 const BG_COLOR       = 0xfffdfc;
 
 // ── Vertex Shader ─────────────────────────────────────────────────────────────
-// New logic:
-// - perfect rectangle at rest
-// - during motion, edges inflate OUTWARD away from center
-// - top goes up, bottom goes down, left goes left, right goes right
-// - strongest at middle of each edge
-// - corners move less
-// - tiny directional bias can be added, but not enough to make it bend inward
+// Main deformation is on the SIDES.
+// Left/right edges bow outward at their vertical center.
+// Top/bottom remain mostly straight, with only a very subtle secondary response.
 const vertexShader = `
   uniform float uTension;   // signed -1..1
   uniform float uStrength;  // 0..1
@@ -47,46 +43,41 @@ const vertexShader = `
     float t  = uTension * uStrength;
     float at = abs(t);
 
-    // ------------------------------------------------------------------
-    // EDGE MASKS
-    // Strongest at middle of each edge, weaker toward corners.
-    // ------------------------------------------------------------------
+    // ------------------------------------------------------------
+    // MAIN EFFECT = SIDE CURVE
+    // Strongest near left/right edges, strongest at vertical center,
+    // weaker toward top/bottom corners.
+    // ------------------------------------------------------------
+    float sideMask = (nx * nx) * (1.0 - ny * ny);
 
-    // For top/bottom: strong near ny = ±1, strongest at nx = 0
+    // Left edge goes left, right edge goes right
+    float sideInflate = sideMask * at * 34.0;
+    pos.x += sign(nx) * sideInflate;
+
+    // ------------------------------------------------------------
+    // VERY SMALL TOP/BOTTOM RESPONSE
+    // Keeps top/bottom mostly straight.
+    // ------------------------------------------------------------
     float topBottomMask = (ny * ny) * (1.0 - nx * nx);
+    float topBottomInflate = topBottomMask * at * 4.0;
+    pos.y += sign(ny) * topBottomInflate;
 
-    // For left/right: strong near nx = ±1, strongest at ny = 0
-    float leftRightMask = (nx * nx) * (1.0 - ny * ny);
-
-    // ------------------------------------------------------------------
-    // PURE OUTWARD INFLATION
-    // Push every edge away from center.
-    // ------------------------------------------------------------------
-    float inflateY = topBottomMask * at * 28.0;
-    float inflateX = leftRightMask * at * 22.0;
-
-    // Top edge goes up, bottom edge goes down
-    pos.y += sign(ny) * inflateY;
-
-    // Right edge goes right, left edge goes left
-    pos.x += sign(nx) * inflateX;
-
-    // ------------------------------------------------------------------
-    // VERY SMALL DIRECTIONAL HORIZONTAL BIAS
-    // Keeps motion tied to slider direction, but does not reintroduce
-    // the "bending inward" problem.
-    // ------------------------------------------------------------------
-    float directionalBias = (1.0 - ny * ny) * t * 6.0;
+    // ------------------------------------------------------------
+    // SMALL DIRECTIONAL BIAS
+    // Ties the block to horizontal movement without turning it into
+    // a top/bottom arch effect.
+    // ------------------------------------------------------------
+    float directionalBias = (1.0 - ny * ny) * t * 5.0;
     pos.x += directionalBias;
 
-    // ------------------------------------------------------------------
-    // Keep center visually stable
-    // ------------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Keep center more stable than the perimeter
+    // ------------------------------------------------------------
     float centerDist = length(vec2(nx * 0.9, ny * 0.9));
-    float centerStable = 1.0 - smoothstep(0.0, 0.28, centerDist);
+    float centerStable = 1.0 - smoothstep(0.0, 0.32, centerDist);
 
-    pos.x = mix(pos.x, position.x, centerStable * 0.25);
-    pos.y = mix(pos.y, position.y, centerStable * 0.25);
+    pos.x = mix(pos.x, position.x, centerStable * 0.18);
+    pos.y = mix(pos.y, position.y, centerStable * 0.35);
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -257,7 +248,7 @@ export default function WorkSlider() {
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
 
-        // Strong center card, but keep side cards visible and subtly reactive
+        // Strongest at center, but keep side cards subtly reactive
         const distFromCenter = Math.abs(rawX);
         const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.55));
 
