@@ -2,19 +2,18 @@ import { useEffect } from 'react';
 import * as THREE from 'three';
 
 // ── Slider sizing ──────────────────────────────────────────────────────────────
-// Smaller cards + tighter spacing so side cards remain much more visible.
 const CARD_W         = 980;
-const CARD_H         = 551; // ~16:9
+const CARD_H         = 551;
 const GAP            = 72;
 const STEP           = CARD_W + GAP;
 
-// Smooth deformation
-const SEGMENTS_X     = 48;
-const SEGMENTS_Y     = 48;
+// Smooth mesh
+const SEGMENTS_X     = 56;
+const SEGMENTS_Y     = 56;
 
 // Motion / tension
 const TENSION_MAX    = 1.0;
-const TENSION_EASE   = 0.024;
+const TENSION_EASE   = 0.028;
 const MOMENTUM_DECAY = 0.91;
 const DRAG_MULTI     = 1.35;
 const WHEEL_MULTI    = 0.42;
@@ -23,15 +22,16 @@ const WHEEL_MULTI    = 0.42;
 const BG_COLOR       = 0xfffdfc;
 
 // ── Vertex Shader ─────────────────────────────────────────────────────────────
-// Goal:
-// - flatter, graphic deformation
-// - top/bottom arc OUTWARD
-// - left/right sides bow OUTWARD (not inward)
-// - direction-aware horizontal drag feel
-// - strongest in center card, weaker on side cards
+// New logic:
+// - perfect rectangle at rest
+// - during motion, edges inflate OUTWARD away from center
+// - top goes up, bottom goes down, left goes left, right goes right
+// - strongest at middle of each edge
+// - corners move less
+// - tiny directional bias can be added, but not enough to make it bend inward
 const vertexShader = `
-  uniform float uTension;   // signed: -1..1
-  uniform float uStrength;  // per-card falloff: 0..1
+  uniform float uTension;   // signed -1..1
+  uniform float uStrength;  // 0..1
   varying vec2 vUv;
 
   void main() {
@@ -47,30 +47,46 @@ const vertexShader = `
     float t  = uTension * uStrength;
     float at = abs(t);
 
-    // 1) Top / bottom arc
-    // Strongest at horizontal center, zero near left/right corners.
-    // Top goes UP, bottom goes DOWN = outward vertical bow.
-    float arcX = 1.0 - nx * nx;
-    float topBottomCurve = arcX * at * 18.0;
-    pos.y += sign(ny) * topBottomCurve;
+    // ------------------------------------------------------------------
+    // EDGE MASKS
+    // Strongest at middle of each edge, weaker toward corners.
+    // ------------------------------------------------------------------
 
-    // 2) Side bow — OUTWARD
-    // Strongest at vertical center, fades toward corners.
-    // Left side goes further left, right side goes further right.
-    float arcY = 1.0 - ny * ny;
-    float sideBow = arcY * at * 14.0;
-    pos.x += sign(nx) * sideBow;
+    // For top/bottom: strong near ny = ±1, strongest at nx = 0
+    float topBottomMask = (ny * ny) * (1.0 - nx * nx);
 
-    // 3) Directional horizontal pull
-    // Adds a subtle drag feel tied to movement direction.
-    // Top and bottom shift in opposite amounts.
-    float directionalPull = ny * t * 20.0;
-    pos.x += directionalPull;
+    // For left/right: strong near nx = ±1, strongest at ny = 0
+    float leftRightMask = (nx * nx) * (1.0 - ny * ny);
 
-    // 4) Keep center flatter than the perimeter
-    float centerStable = 1.0 - smoothstep(0.0, 0.42, length(vec2(nx * 0.82, ny * 0.68)));
-    pos.y *= mix(1.0, 0.985, centerStable * 0.35);
-    pos.x *= mix(1.0, 0.992, centerStable * 0.2);
+    // ------------------------------------------------------------------
+    // PURE OUTWARD INFLATION
+    // Push every edge away from center.
+    // ------------------------------------------------------------------
+    float inflateY = topBottomMask * at * 28.0;
+    float inflateX = leftRightMask * at * 22.0;
+
+    // Top edge goes up, bottom edge goes down
+    pos.y += sign(ny) * inflateY;
+
+    // Right edge goes right, left edge goes left
+    pos.x += sign(nx) * inflateX;
+
+    // ------------------------------------------------------------------
+    // VERY SMALL DIRECTIONAL HORIZONTAL BIAS
+    // Keeps motion tied to slider direction, but does not reintroduce
+    // the "bending inward" problem.
+    // ------------------------------------------------------------------
+    float directionalBias = (1.0 - ny * ny) * t * 6.0;
+    pos.x += directionalBias;
+
+    // ------------------------------------------------------------------
+    // Keep center visually stable
+    // ------------------------------------------------------------------
+    float centerDist = length(vec2(nx * 0.9, ny * 0.9));
+    float centerStable = 1.0 - smoothstep(0.0, 0.28, centerDist);
+
+    pos.x = mix(pos.x, position.x, centerStable * 0.25);
+    pos.y = mix(pos.y, position.y, centerStable * 0.25);
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -142,7 +158,6 @@ export default function WorkSlider() {
 
     const scene = new THREE.Scene();
 
-    // Orthographic camera keeps everything flat/graphic
     const camera = new THREE.OrthographicCamera(
       W / -2,
       W / 2,
@@ -242,12 +257,12 @@ export default function WorkSlider() {
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
 
-        // Strongest at center, but let side cards still keep some subtle deformation
+        // Strong center card, but keep side cards visible and subtly reactive
         const distFromCenter = Math.abs(rawX);
-        const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.45));
+        const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.55));
 
         card.mat.uniforms.uTension.value = currentTension;
-        card.mat.uniforms.uStrength.value = Math.pow(strength, 1.35);
+        card.mat.uniforms.uStrength.value = Math.pow(strength, 1.2);
       });
     }
 
@@ -309,7 +324,7 @@ export default function WorkSlider() {
       const rawSpeed = isDragging ? dragVel * 6 : velocity;
       targetTension = Math.max(
         -TENSION_MAX,
-        Math.min(TENSION_MAX, rawSpeed / 135)
+        Math.min(TENSION_MAX, rawSpeed / 140)
       );
 
       currentTension += (targetTension - currentTension) * TENSION_EASE;
