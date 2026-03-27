@@ -14,12 +14,24 @@ const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.5;
 const BG_COLOR       = 0xfffdfc;
 
-// Radial pillow bulge:
-// Center stays flat, all edges bow outward equally
-// distFromCenter = normalized distance from card center (0 at center, ~1 at corners)
-// bulge = distFromCenter * (1 - distFromCenter) → peaks halfway between center and edge
+// ── Vertex Shader ─────────────────────────────────────────────────────────────
+// uTension:    signed scroll speed [-1, +1]
+// uCardOffset: card's rawX position in world (negative = left, positive = right, 0 = center)
+//
+// CENTER CARD (uCardOffset ≈ 0):
+//   left edge pinches IN, right edge pinches IN → compressed
+//
+// LEFT CARD (uCardOffset < 0):
+//   left edge bows OUT (away from center), right edge barely moves → stretched left
+//
+// RIGHT CARD (uCardOffset > 0):
+//   right edge bows OUT (away from center), left edge barely moves → stretched right
+//
+// The deformation only applies to left/right edges (nx = ±1).
+// Top/bottom edges stay straight (verticalArc = 0 at ny = ±1).
 const vertexShader = `
   uniform float uTension;
+  uniform float uCardOffset;
   varying vec2 vUv;
 
   void main() {
@@ -29,13 +41,38 @@ const vertexShader = `
     float nx = pos.x / ${(CARD_W * 0.5).toFixed(1)};
     float ny = pos.y / ${(CARD_H * 0.5).toFixed(1)};
 
-    // Radial distance from center, normalized to [0, 1]
-    float dist = sqrt(nx * nx + ny * ny) / sqrt(2.0);
+    // verticalArc: 1 at vertical center, 0 at top/bottom — keeps edges straight
+    float verticalArc = 1.0 - ny * ny;
 
-    // Pillow curve: 0 at center, peaks at ~0.5 dist, 0 at corners
-    float bulge = dist * (1.0 - dist) * 4.0;
+    // How far from center is this card? Normalized.
+    // Center = 0, far sides = ±1
+    float cardRole = clamp(uCardOffset / ${(STEP * 1.0).toFixed(1)}, -1.0, 1.0);
 
-    pos.z += bulge * uTension * ${(CARD_W * 0.22).toFixed(1)};
+    float deform = 0.0;
+
+    if (abs(cardRole) < 0.3) {
+      // CENTER CARD: both edges pinch inward
+      // nx = +1 (right edge) moves left (negative X)
+      // nx = -1 (left edge) moves right (positive X)
+      // → multiply by -nx to invert direction
+      deform = -nx * nx * verticalArc * uTension * ${(CARD_W * 0.18).toFixed(1)};
+    } else {
+      // SIDE CARD: outer edge bows outward, inner edge barely moves
+      // "outer" = edge pointing away from center
+      // for left card (cardRole < 0): outer edge is at nx = -1
+      // for right card (cardRole > 0): outer edge is at nx = +1
+      float outerSign = sign(cardRole); // -1 for left card, +1 for right card
+
+      // outerFactor: 1 when nx points outward, 0 when pointing inward
+      // For left card: nx=-1 is outer → outerFactor = (-nx * outerSign + 1) / 2
+      float outerFactor = (nx * outerSign + 1.0) * 0.5; // 0 at inner edge, 1 at outer edge
+
+      // Asymmetric: outer bows a lot, inner barely moves
+      float bowStrength = mix(0.06, 1.0, outerFactor * outerFactor);
+      deform = bowStrength * verticalArc * uTension * ${(CARD_W * 0.22).toFixed(1)};
+    }
+
+    pos.x += deform;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -113,9 +150,10 @@ export default function WorkSlider() {
       const mat = new THREE.ShaderMaterial({
         vertexShader, fragmentShader,
         uniforms: {
-          uTexture: { value: new THREE.CanvasTexture(c) },
-          uTension: { value: 0.0 },
-          uOpacity: { value: 1.0 },
+          uTexture:    { value: new THREE.CanvasTexture(c) },
+          uTension:    { value: 0.0 },
+          uCardOffset: { value: 0.0 },
+          uOpacity:    { value: 1.0 },
         },
         transparent: false,
         side: THREE.FrontSide,
@@ -164,13 +202,16 @@ export default function WorkSlider() {
       const total = cards.length;
       if (!total) return;
       const bandW = total * STEP;
+
       cards.forEach((card, i) => {
         let rawX = i * STEP - offset;
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
+
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
-        card.mat.uniforms.uTension.value = currentTension;
+        card.mat.uniforms.uTension.value    = currentTension;
+        card.mat.uniforms.uCardOffset.value = rawX;
       });
     }
 
