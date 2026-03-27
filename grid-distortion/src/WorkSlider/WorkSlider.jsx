@@ -1,25 +1,34 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-// ── Constants ──────────────────────────────────────────────────────────────────
-const CARD_W         = 1246;
-const CARD_H         = 700;
-const GAP            = 256;
+// ── Slider sizing ──────────────────────────────────────────────────────────────
+// Smaller cards + tighter spacing so side cards remain much more visible.
+const CARD_W         = 980;
+const CARD_H         = 551; // ~16:9
+const GAP            = 72;
 const STEP           = CARD_W + GAP;
+
+// Smooth deformation
 const SEGMENTS_X     = 48;
 const SEGMENTS_Y     = 48;
 
+// Motion / tension
 const TENSION_MAX    = 1.0;
 const TENSION_EASE   = 0.024;
 const MOMENTUM_DECAY = 0.91;
-const DRAG_MULTI     = 1.4;
-const WHEEL_MULTI    = 0.5;
+const DRAG_MULTI     = 1.35;
+const WHEEL_MULTI    = 0.42;
+
+// Visuals
 const BG_COLOR       = 0xfffdfc;
 
 // ── Vertex Shader ─────────────────────────────────────────────────────────────
-// This version keeps the effect visually flatter.
-// It deforms mostly in X/Y silhouette space instead of bulging in Z,
-// so the card feels like an elastic sheet rather than a curved 3D screen.
+// Goal:
+// - flatter, graphic deformation
+// - top/bottom arc OUTWARD
+// - left/right sides bow OUTWARD (not inward)
+// - direction-aware horizontal drag feel
+// - strongest in center card, weaker on side cards
 const vertexShader = `
   uniform float uTension;   // signed: -1..1
   uniform float uStrength;  // per-card falloff: 0..1
@@ -38,27 +47,30 @@ const vertexShader = `
     float t  = uTension * uStrength;
     float at = abs(t);
 
-    // 1) Top/bottom arc
-    // Strongest at horizontal center, fades toward left/right corners.
+    // 1) Top / bottom arc
+    // Strongest at horizontal center, zero near left/right corners.
+    // Top goes UP, bottom goes DOWN = outward vertical bow.
     float arcX = 1.0 - nx * nx;
-    float topBottomCurve = arcX * at * 26.0;
+    float topBottomCurve = arcX * at * 18.0;
     pos.y += sign(ny) * topBottomCurve;
 
-    // 2) Side bow
-    // Strongest at vertical center, fades toward top/bottom corners.
+    // 2) Side bow — OUTWARD
+    // Strongest at vertical center, fades toward corners.
+    // Left side goes further left, right side goes further right.
     float arcY = 1.0 - ny * ny;
-    float sideBow = arcY * at * 16.0;
-    pos.x -= sign(nx) * sideBow;
+    float sideBow = arcY * at * 14.0;
+    pos.x += sign(nx) * sideBow;
 
     // 3) Directional horizontal pull
-    // Gives the whole sheet a directional tension feel.
-    float directionalPull = ny * t * 34.0;
+    // Adds a subtle drag feel tied to movement direction.
+    // Top and bottom shift in opposite amounts.
+    float directionalPull = ny * t * 20.0;
     pos.x += directionalPull;
 
-    // 4) Keep center a bit more stable than the perimeter
-    float centerStable = 1.0 - smoothstep(0.0, 0.35, length(vec2(nx * 0.85, ny * 0.65)));
-    pos.y *= mix(1.0, 0.96, centerStable * 0.35);
-    pos.x *= mix(1.0, 0.985, centerStable * 0.2);
+    // 4) Keep center flatter than the perimeter
+    float centerStable = 1.0 - smoothstep(0.0, 0.42, length(vec2(nx * 0.82, ny * 0.68)));
+    pos.y *= mix(1.0, 0.985, centerStable * 0.35);
+    pos.x *= mix(1.0, 0.992, centerStable * 0.2);
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -130,7 +142,7 @@ export default function WorkSlider() {
 
     const scene = new THREE.Scene();
 
-    // Orthographic camera keeps the effect flatter and prevents the “curved screen” look.
+    // Orthographic camera keeps everything flat/graphic
     const camera = new THREE.OrthographicCamera(
       W / -2,
       W / 2,
@@ -145,11 +157,9 @@ export default function WorkSlider() {
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2(-9999, -9999);
 
-    // ── Card factory ──────────────────────────────────────────────────────────
     function createCard(item, index) {
       const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS_X, SEGMENTS_Y);
 
-      // Small placeholder canvas texture before video is ready
       const c = document.createElement('canvas');
       c.width = 4;
       c.height = 4;
@@ -218,7 +228,6 @@ export default function WorkSlider() {
       return { mesh, mat, vid, item, index };
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────────
     function layout() {
       const total = cards.length;
       if (!total) return;
@@ -233,16 +242,15 @@ export default function WorkSlider() {
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
 
-        // Strongest at center, fades toward the sides
+        // Strongest at center, but let side cards still keep some subtle deformation
         const distFromCenter = Math.abs(rawX);
-        const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.1));
+        const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.45));
 
         card.mat.uniforms.uTension.value = currentTension;
-        card.mat.uniforms.uStrength.value = Math.pow(strength, 1.6);
+        card.mat.uniforms.uStrength.value = Math.pow(strength, 1.35);
       });
     }
 
-    // ── Snap helpers ──────────────────────────────────────────────────────────
     function getCenter() {
       const total = cards.length;
       if (!total) return 0;
@@ -277,11 +285,9 @@ export default function WorkSlider() {
       isSnapping = true;
     }
 
-    // ── Animation loop ────────────────────────────────────────────────────────
     function animate() {
       animId = requestAnimationFrame(animate);
 
-      // Position / snapping / inertia
       if (isSnapping) {
         const d = snapTarget - offset;
         offset += d * 0.055;
@@ -300,20 +306,17 @@ export default function WorkSlider() {
         }
       }
 
-      // Signed horizontal tension based on momentum
       const rawSpeed = isDragging ? dragVel * 6 : velocity;
       targetTension = Math.max(
         -TENSION_MAX,
-        Math.min(TENSION_MAX, rawSpeed / 120)
+        Math.min(TENSION_MAX, rawSpeed / 135)
       );
 
-      // Smooth damped interpolation
       currentTension += (targetTension - currentTension) * TENSION_EASE;
       if (Math.abs(currentTension) < 0.0002) currentTension = 0;
 
       layout();
 
-      // Hover detection
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(cards.map((c) => c.mesh));
       const newHovered = hits.length > 0 ? hits[0].object.userData.index : -1;
@@ -343,15 +346,13 @@ export default function WorkSlider() {
       renderer.render(scene, camera);
     }
 
-    // ── Events ────────────────────────────────────────────────────────────────
     const onWheel = (e) => {
       e.preventDefault();
       isSnapping = false;
       clearTimeout(snapTimer);
 
       velocity = Math.max(-80, Math.min(80, velocity + e.deltaY * WHEEL_MULTI));
-
-      snapTimer = setTimeout(snapToCenter, 400);
+      snapTimer = setTimeout(snapToCenter, 350);
     };
 
     const onMouseDown = (e) => {
@@ -387,7 +388,7 @@ export default function WorkSlider() {
       velocity = Math.max(-80, Math.min(80, dragVel * 5));
       renderer.domElement.style.cursor = 'grab';
 
-      snapTimer = setTimeout(snapToCenter, 400);
+      snapTimer = setTimeout(snapToCenter, 350);
     };
 
     const onMouseLeave = () => {
@@ -426,7 +427,7 @@ export default function WorkSlider() {
     const onTouchEnd = () => {
       isDragging = false;
       velocity = Math.max(-80, Math.min(80, tV * 5));
-      snapTimer = setTimeout(snapToCenter, 400);
+      snapTimer = setTimeout(snapToCenter, 350);
     };
 
     const onResize = () => {
