@@ -5,27 +5,19 @@ const CARD_W         = 1246;
 const CARD_H         = 700;
 const GAP            = 256;
 const STEP           = CARD_W + GAP;
-const SEGMENTS_X     = 1;    // top/bottom stay straight — no X subdivision needed
-const SEGMENTS_Y     = 48;   // many Y segments for smooth side bow
+const SEGMENTS_X     = 48;
+const SEGMENTS_Y     = 48;
 const TENSION_MAX    = 1.0;
-const TENSION_EASE   = 0.016;  // ~1.5s damped return
+const TENSION_EASE   = 0.016;
 const MOMENTUM_DECAY = 0.91;
 const DRAG_MULTI     = 1.4;
 const WHEEL_MULTI    = 0.5;
 const BG_COLOR       = 0xfffdfc;
 
-// The deformation:
-// Top edge (ny = +1): stays perfectly straight — no Z movement
-// Bottom edge (ny = -1): stays perfectly straight — no Z movement
-// Left edge (nx = -1): bows outward in Z at vertical center, fades toward top/bottom corners
-// Right edge (nx = +1): bows outward in Z at vertical center, fades toward top/bottom corners
-// Center (nx = 0): no movement
-//
-// Formula:
-// Z displacement = sideEdgeFactor * verticalArc * tension * strength
-// sideEdgeFactor = nx * nx        → 0 at center, 1 at left/right edges
-// verticalArc    = 1 - ny * ny    → 0 at top/bottom, 1 at vertical center
-// So: corners stay fixed, side midpoints bow out, top/bottom edges stay straight
+// Radial pillow bulge:
+// Center stays flat, all edges bow outward equally
+// distFromCenter = normalized distance from card center (0 at center, ~1 at corners)
+// bulge = distFromCenter * (1 - distFromCenter) → peaks halfway between center and edge
 const vertexShader = `
   uniform float uTension;
   varying vec2 vUv;
@@ -37,14 +29,13 @@ const vertexShader = `
     float nx = pos.x / ${(CARD_W * 0.5).toFixed(1)};
     float ny = pos.y / ${(CARD_H * 0.5).toFixed(1)};
 
-    // Side bow: left and right edges push forward at their midpoints
-    // Corners stay fixed (verticalArc = 0 at ny = +-1)
-    // Center stays fixed (sideEdgeFactor = 0 at nx = 0)
-    float sideEdgeFactor = nx * nx;
-    float verticalArc    = 1.0 - ny * ny;
-    float bow = sideEdgeFactor * verticalArc * uTension * ${(CARD_W * 0.28).toFixed(1)};
+    // Radial distance from center, normalized to [0, 1]
+    float dist = sqrt(nx * nx + ny * ny) / sqrt(2.0);
 
-    pos.z += bow;
+    // Pillow curve: 0 at center, peaks at ~0.5 dist, 0 at corners
+    float bulge = dist * (1.0 - dist) * 4.0;
+
+    pos.z += bulge * uTension * ${(CARD_W * 0.22).toFixed(1)};
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -120,8 +111,7 @@ export default function WorkSlider() {
       c.getContext('2d').fillRect(0, 0, 4, 4);
 
       const mat = new THREE.ShaderMaterial({
-        vertexShader,
-        fragmentShader,
+        vertexShader, fragmentShader,
         uniforms: {
           uTexture: { value: new THREE.CanvasTexture(c) },
           uTension: { value: 0.0 },
@@ -221,7 +211,6 @@ export default function WorkSlider() {
         if (Math.abs(velocity) < 0.04) { velocity = 0; snapToCenter(); }
       }
 
-      // Signed tension: positive = moving right, negative = left
       const rawSpeed = isDragging ? dragVel * 6 : velocity;
       targetTension = Math.max(-TENSION_MAX, Math.min(TENSION_MAX, rawSpeed / 80));
       currentTension += (targetTension - currentTension) * TENSION_EASE;
