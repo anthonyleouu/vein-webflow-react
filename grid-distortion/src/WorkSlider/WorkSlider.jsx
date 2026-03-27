@@ -1,83 +1,50 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
-// ── Slider sizing ──────────────────────────────────────────────────────────────
-const CARD_W         = 980;
-const CARD_H         = 551;
-const GAP            = 72;
+const CARD_W         = 1246;
+const CARD_H         = 700;
+const GAP            = 256;
 const STEP           = CARD_W + GAP;
-
-// Smooth mesh
-const SEGMENTS_X     = 56;
-const SEGMENTS_Y     = 56;
-
-// Motion / tension
+const SEGMENTS_X     = 1;    // top/bottom stay straight — no X subdivision needed
+const SEGMENTS_Y     = 48;   // many Y segments for smooth side bow
 const TENSION_MAX    = 1.0;
-const TENSION_EASE   = 0.028;
+const TENSION_EASE   = 0.016;  // ~1.5s damped return
 const MOMENTUM_DECAY = 0.91;
-const DRAG_MULTI     = 1.35;
-const WHEEL_MULTI    = 0.42;
-
-// Visuals
+const DRAG_MULTI     = 1.4;
+const WHEEL_MULTI    = 0.5;
 const BG_COLOR       = 0xfffdfc;
 
-// ── Vertex Shader ─────────────────────────────────────────────────────────────
-// Main deformation is on the SIDES.
-// Left/right edges bow outward at their vertical center.
-// Top/bottom remain mostly straight, with only a very subtle secondary response.
+// The deformation:
+// Top edge (ny = +1): stays perfectly straight — no Z movement
+// Bottom edge (ny = -1): stays perfectly straight — no Z movement
+// Left edge (nx = -1): bows outward in Z at vertical center, fades toward top/bottom corners
+// Right edge (nx = +1): bows outward in Z at vertical center, fades toward top/bottom corners
+// Center (nx = 0): no movement
+//
+// Formula:
+// Z displacement = sideEdgeFactor * verticalArc * tension * strength
+// sideEdgeFactor = nx * nx        → 0 at center, 1 at left/right edges
+// verticalArc    = 1 - ny * ny    → 0 at top/bottom, 1 at vertical center
+// So: corners stay fixed, side midpoints bow out, top/bottom edges stay straight
 const vertexShader = `
-  uniform float uTension;   // signed -1..1
-  uniform float uStrength;  // 0..1
+  uniform float uTension;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vec3 pos = position;
 
-    float halfW = ${ (CARD_W * 0.5).toFixed(1) };
-    float halfH = ${ (CARD_H * 0.5).toFixed(1) };
+    float nx = pos.x / ${(CARD_W * 0.5).toFixed(1)};
+    float ny = pos.y / ${(CARD_H * 0.5).toFixed(1)};
 
-    float nx = pos.x / halfW; // -1 left, +1 right
-    float ny = pos.y / halfH; // -1 bottom, +1 top
+    // Side bow: left and right edges push forward at their midpoints
+    // Corners stay fixed (verticalArc = 0 at ny = +-1)
+    // Center stays fixed (sideEdgeFactor = 0 at nx = 0)
+    float sideEdgeFactor = nx * nx;
+    float verticalArc    = 1.0 - ny * ny;
+    float bow = sideEdgeFactor * verticalArc * uTension * ${(CARD_W * 0.28).toFixed(1)};
 
-    float t  = uTension * uStrength;
-    float at = abs(t);
-
-    // ------------------------------------------------------------
-    // MAIN EFFECT = SIDE CURVE
-    // Strongest near left/right edges, strongest at vertical center,
-    // weaker toward top/bottom corners.
-    // ------------------------------------------------------------
-    float sideMask = (nx * nx) * (1.0 - ny * ny);
-
-    // Left edge goes left, right edge goes right
-    float sideInflate = sideMask * at * 34.0;
-    pos.x += sign(nx) * sideInflate;
-
-    // ------------------------------------------------------------
-    // VERY SMALL TOP/BOTTOM RESPONSE
-    // Keeps top/bottom mostly straight.
-    // ------------------------------------------------------------
-    float topBottomMask = (ny * ny) * (1.0 - nx * nx);
-    float topBottomInflate = topBottomMask * at * 4.0;
-    pos.y += sign(ny) * topBottomInflate;
-
-    // ------------------------------------------------------------
-    // SMALL DIRECTIONAL BIAS
-    // Ties the block to horizontal movement without turning it into
-    // a top/bottom arch effect.
-    // ------------------------------------------------------------
-    float directionalBias = (1.0 - ny * ny) * t * 5.0;
-    pos.x += directionalBias;
-
-    // ------------------------------------------------------------
-    // Keep center more stable than the perimeter
-    // ------------------------------------------------------------
-    float centerDist = length(vec2(nx * 0.9, ny * 0.9));
-    float centerStable = 1.0 - smoothstep(0.0, 0.32, centerDist);
-
-    pos.x = mix(pos.x, position.x, centerStable * 0.18);
-    pos.y = mix(pos.y, position.y, centerStable * 0.35);
+    pos.z += bow;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
@@ -87,7 +54,6 @@ const fragmentShader = `
   uniform sampler2D uTexture;
   uniform float uOpacity;
   varying vec2 vUv;
-
   void main() {
     vec4 c = texture2D(uTexture, vUv);
     gl_FragColor = vec4(c.rgb, c.a * uOpacity);
@@ -99,65 +65,47 @@ export default function WorkSlider() {
     const container = document.getElementById('work-slider-root');
     if (!container) return;
 
-    let cards = [];
-    let offset = 0;
-    let velocity = 0;
-
-    let targetTension = 0;
-    let currentTension = 0;
-
-    let isDragging = false;
-    let dragStartX = 0;
+    let cards           = [];
+    let offset          = 0;
+    let velocity        = 0;
+    let targetTension   = 0;
+    let currentTension  = 0;
+    let isDragging      = false;
+    let dragStartX      = 0;
     let dragOffsetStart = 0;
-    let lastDragX = 0;
-    let dragVel = 0;
+    let lastDragX       = 0;
+    let dragVel         = 0;
+    let animId          = null;
+    let hoveredIndex    = -1;
+    let snapTimer       = null;
+    let isSnapping      = false;
+    let snapTarget      = 0;
 
-    let animId = null;
-    let hoveredIndex = -1;
-    let snapTimer = null;
-    let isSnapping = false;
-    let snapTarget = 0;
-
-    const numEl = document.getElementById('work-number');
+    const numEl    = document.getElementById('work-number');
     const clientEl = document.getElementById('work-client');
+    if (numEl)    { numEl.style.opacity = '0'; numEl.style.transition = 'opacity 0.25s'; }
+    if (clientEl) { clientEl.style.opacity = '0'; clientEl.style.transition = 'opacity 0.25s'; }
 
-    if (numEl) {
-      numEl.style.opacity = '0';
-      numEl.style.transition = 'opacity 0.25s';
-    }
-    if (clientEl) {
-      clientEl.style.opacity = '0';
-      clientEl.style.transition = 'opacity 0.25s';
-    }
-
-    const W = window.innerWidth;
-    const H = window.innerHeight;
+    const W    = window.innerWidth;
+    const H    = window.innerHeight;
+    const fov  = 50;
+    const vFov = (fov * Math.PI) / 180;
+    const camZ = H / (2 * Math.tan(vFov / 2));
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
+      antialias: true, alpha: false,
       powerPreference: 'high-performance',
     });
-
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.setClearColor(BG_COLOR, 1);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
-
-    const camera = new THREE.OrthographicCamera(
-      W / -2,
-      W / 2,
-      H / 2,
-      H / -2,
-      -5000,
-      5000
-    );
-    camera.position.set(0, 0, 10);
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(fov, W / H, 1, 20000);
+    camera.position.set(0, 0, camZ);
     camera.lookAt(0, 0, 0);
 
     const raycaster = new THREE.Raycaster();
@@ -167,23 +115,17 @@ export default function WorkSlider() {
       const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, SEGMENTS_X, SEGMENTS_Y);
 
       const c = document.createElement('canvas');
-      c.width = 4;
-      c.height = 4;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#888';
-      ctx.fillRect(0, 0, 4, 4);
-
-      const placeholderTex = new THREE.CanvasTexture(c);
-      placeholderTex.colorSpace = THREE.SRGBColorSpace;
+      c.width = 4; c.height = 4;
+      c.getContext('2d').fillStyle = '#888';
+      c.getContext('2d').fillRect(0, 0, 4, 4);
 
       const mat = new THREE.ShaderMaterial({
         vertexShader,
         fragmentShader,
         uniforms: {
-          uTexture:  { value: placeholderTex },
-          uTension:  { value: 0.0 },
-          uStrength: { value: 0.0 },
-          uOpacity:  { value: 1.0 },
+          uTexture: { value: new THREE.CanvasTexture(c) },
+          uTension: { value: 0.0 },
+          uOpacity: { value: 1.0 },
         },
         transparent: false,
         side: THREE.FrontSide,
@@ -191,15 +133,12 @@ export default function WorkSlider() {
 
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData.index = index;
-      mesh.userData.item = item;
+      mesh.userData.item  = item;
       scene.add(mesh);
 
       const vid = document.createElement('video');
-      vid.muted = true;
-      vid.loop = true;
-      vid.playsInline = true;
-      vid.crossOrigin = 'anonymous';
-      vid.preload = 'auto';
+      vid.muted = true; vid.loop = true;
+      vid.playsInline = true; vid.crossOrigin = 'anonymous';
 
       const applyTex = () => {
         const tex = new THREE.VideoTexture(vid);
@@ -215,10 +154,7 @@ export default function WorkSlider() {
         vid.addEventListener('loadedmetadata', applyTex, { once: true });
         vid.play().catch(() => {});
       } else if (window.Hls && window.Hls.isSupported()) {
-        const hls = new window.Hls({
-          enableWorker: false,
-          maxBufferLength: 10,
-        });
+        const hls = new window.Hls({ enableWorker: false, maxBufferLength: 10 });
         hls.loadSource(item.videoUrl);
         hls.attachMedia(vid);
         hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
@@ -237,53 +173,34 @@ export default function WorkSlider() {
     function layout() {
       const total = cards.length;
       if (!total) return;
-
       const bandW = total * STEP;
-
       cards.forEach((card, i) => {
         let rawX = i * STEP - offset;
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
-
         card.mesh.position.set(rawX, 0, 0);
         card.mesh.rotation.set(0, 0, 0);
-
-        // Strongest at center, but keep side cards subtly reactive
-        const distFromCenter = Math.abs(rawX);
-        const strength = Math.max(0, 1 - distFromCenter / (CARD_W * 1.55));
-
         card.mat.uniforms.uTension.value = currentTension;
-        card.mat.uniforms.uStrength.value = Math.pow(strength, 1.2);
       });
     }
 
     function getCenter() {
       const total = cards.length;
       if (!total) return 0;
-
       const bandW = total * STEP;
-      let best = 0;
-      let bestD = Infinity;
-
+      let best = 0, bestD = Infinity;
       cards.forEach((_, i) => {
         let rawX = i * STEP - offset;
         rawX = ((rawX % bandW) + bandW) % bandW;
         if (rawX > bandW / 2) rawX -= bandW;
-
-        const d = Math.abs(rawX);
-        if (d < bestD) {
-          bestD = d;
-          best = i;
-        }
+        if (Math.abs(rawX) < bestD) { bestD = Math.abs(rawX); best = i; }
       });
-
       return best;
     }
 
     function snapToCenter() {
       const total = cards.length;
       if (!total) return;
-
       const bandW = total * STEP;
       const best = getCenter();
       const diff = ((best * STEP - offset) % bandW + bandW) % bandW;
@@ -297,54 +214,35 @@ export default function WorkSlider() {
       if (isSnapping) {
         const d = snapTarget - offset;
         offset += d * 0.055;
-
-        if (Math.abs(d) < 0.25) {
-          offset = snapTarget;
-          isSnapping = false;
-        }
+        if (Math.abs(d) < 0.25) { offset = snapTarget; isSnapping = false; }
       } else if (!isDragging) {
         velocity *= MOMENTUM_DECAY;
         offset += velocity;
-
-        if (Math.abs(velocity) < 0.04) {
-          velocity = 0;
-          snapToCenter();
-        }
+        if (Math.abs(velocity) < 0.04) { velocity = 0; snapToCenter(); }
       }
 
+      // Signed tension: positive = moving right, negative = left
       const rawSpeed = isDragging ? dragVel * 6 : velocity;
-      targetTension = Math.max(
-        -TENSION_MAX,
-        Math.min(TENSION_MAX, rawSpeed / 140)
-      );
-
+      targetTension = Math.max(-TENSION_MAX, Math.min(TENSION_MAX, rawSpeed / 80));
       currentTension += (targetTension - currentTension) * TENSION_EASE;
       if (Math.abs(currentTension) < 0.0002) currentTension = 0;
 
       layout();
 
       raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(cards.map((c) => c.mesh));
+      const hits = raycaster.intersectObjects(cards.map(c => c.mesh));
       const newHovered = hits.length > 0 ? hits[0].object.userData.index : -1;
-
       if (newHovered !== hoveredIndex) {
         hoveredIndex = newHovered;
-
         if (hoveredIndex >= 0) {
           const item = cards[hoveredIndex]?.item;
           if (item) {
             const num = String(hoveredIndex + 1).padStart(3, '0');
-            if (numEl) {
-              numEl.textContent = num;
-              numEl.style.opacity = '1';
-            }
-            if (clientEl) {
-              clientEl.textContent = item.client || item.name || '';
-              clientEl.style.opacity = '1';
-            }
+            if (numEl)    { numEl.textContent = num; numEl.style.opacity = '1'; }
+            if (clientEl) { clientEl.textContent = item.client || item.name || ''; clientEl.style.opacity = '1'; }
           }
         } else {
-          if (numEl) numEl.style.opacity = '0';
+          if (numEl)    numEl.style.opacity = '0';
           if (clientEl) clientEl.style.opacity = '0';
         }
       }
@@ -354,118 +252,70 @@ export default function WorkSlider() {
 
     const onWheel = (e) => {
       e.preventDefault();
-      isSnapping = false;
-      clearTimeout(snapTimer);
-
+      isSnapping = false; clearTimeout(snapTimer);
       velocity = Math.max(-80, Math.min(80, velocity + e.deltaY * WHEEL_MULTI));
-      snapTimer = setTimeout(snapToCenter, 350);
+      snapTimer = setTimeout(snapToCenter, 400);
     };
 
     const onMouseDown = (e) => {
-      isDragging = true;
-      isSnapping = false;
-      clearTimeout(snapTimer);
-
-      dragStartX = e.clientX;
-      dragOffsetStart = offset;
-      lastDragX = e.clientX;
-      dragVel = 0;
-
+      isDragging = true; isSnapping = false; clearTimeout(snapTimer);
+      dragStartX = e.clientX; dragOffsetStart = offset;
+      lastDragX = e.clientX; dragVel = 0;
       renderer.domElement.style.cursor = 'grabbing';
     };
 
     const onMouseMove = (e) => {
-      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
       if (!isDragging) return;
-
       const dx = (e.clientX - lastDragX) * DRAG_MULTI;
       dragVel = -dx;
-
       offset = dragOffsetStart - (e.clientX - dragStartX) * DRAG_MULTI;
       lastDragX = e.clientX;
     };
 
     const onMouseUp = () => {
       if (!isDragging) return;
-
       isDragging = false;
       velocity = Math.max(-80, Math.min(80, dragVel * 5));
       renderer.domElement.style.cursor = 'grab';
-
-      snapTimer = setTimeout(snapToCenter, 350);
+      snapTimer = setTimeout(snapToCenter, 400);
     };
 
     const onMouseLeave = () => {
       mouse.set(-9999, -9999);
-      if (numEl) numEl.style.opacity = '0';
+      if (numEl)    numEl.style.opacity = '0';
       if (clientEl) clientEl.style.opacity = '0';
       hoveredIndex = -1;
     };
 
-    let tX = 0;
-    let tLX = 0;
-    let tV = 0;
-    let tOS = 0;
-
-    const onTouchStart = (e) => {
-      isDragging = true;
-      isSnapping = false;
-      clearTimeout(snapTimer);
-
-      tX = e.touches[0].clientX;
-      tLX = tX;
-      tOS = offset;
-      tV = 0;
-    };
-
-    const onTouchMove = (e) => {
-      if (!isDragging) return;
-      e.preventDefault();
-
-      const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI;
-      tV = -dx;
-      offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI;
-      tLX = e.touches[0].clientX;
-    };
-
-    const onTouchEnd = () => {
-      isDragging = false;
-      velocity = Math.max(-80, Math.min(80, tV * 5));
-      snapTimer = setTimeout(snapToCenter, 350);
-    };
+    let tX = 0, tLX = 0, tV = 0, tOS = 0;
+    const onTouchStart = (e) => { isDragging = true; isSnapping = false; clearTimeout(snapTimer); tX = e.touches[0].clientX; tLX = tX; tOS = offset; tV = 0; };
+    const onTouchMove  = (e) => { if (!isDragging) return; e.preventDefault(); const dx = (e.touches[0].clientX - tLX) * DRAG_MULTI; tV = -dx; offset = tOS - (e.touches[0].clientX - tX) * DRAG_MULTI; tLX = e.touches[0].clientX; };
+    const onTouchEnd   = () => { isDragging = false; velocity = Math.max(-80, Math.min(80, tV * 5)); snapTimer = setTimeout(snapToCenter, 400); };
 
     const onResize = () => {
-      const W2 = window.innerWidth;
-      const H2 = window.innerHeight;
-
+      const W2 = window.innerWidth, H2 = window.innerHeight;
       renderer.setSize(W2, H2);
-
-      camera.left = W2 / -2;
-      camera.right = W2 / 2;
-      camera.top = H2 / 2;
-      camera.bottom = H2 / -2;
+      camera.aspect = W2 / H2;
+      camera.position.z = H2 / (2 * Math.tan(vFov / 2));
       camera.updateProjectionMatrix();
     };
 
-    renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
-    renderer.domElement.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    renderer.domElement.addEventListener('wheel',      onWheel,      { passive: false });
+    renderer.domElement.addEventListener('mousedown',  onMouseDown);
+    window.addEventListener             ('mousemove',  onMouseMove);
+    window.addEventListener             ('mouseup',    onMouseUp);
     renderer.domElement.addEventListener('mouseleave', onMouseLeave);
-
     renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
-    renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
-    renderer.domElement.addEventListener('touchend', onTouchEnd);
-
-    window.addEventListener('resize', onResize);
-
+    renderer.domElement.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    renderer.domElement.addEventListener('touchend',   onTouchEnd);
+    window.addEventListener             ('resize',     onResize);
     renderer.domElement.style.cursor = 'grab';
 
     fetch('https://vein-webflow-react.vercel.app/api/work')
-      .then((r) => r.json())
-      .then((data) => {
+      .then(r => r.json())
+      .then(data => {
         cards = (data.items || []).map((item, i) => createCard(item, i));
         animate();
       })
@@ -474,31 +324,20 @@ export default function WorkSlider() {
     return () => {
       cancelAnimationFrame(animId);
       clearTimeout(snapTimer);
-
-      renderer.domElement.removeEventListener('wheel', onWheel);
-      renderer.domElement.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      renderer.domElement.removeEventListener('wheel',      onWheel);
+      renderer.domElement.removeEventListener('mousedown',  onMouseDown);
+      window.removeEventListener             ('mousemove',  onMouseMove);
+      window.removeEventListener             ('mouseup',    onMouseUp);
       renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
-
       renderer.domElement.removeEventListener('touchstart', onTouchStart);
-      renderer.domElement.removeEventListener('touchmove', onTouchMove);
-      renderer.domElement.removeEventListener('touchend', onTouchEnd);
-
-      window.removeEventListener('resize', onResize);
-
-      cards.forEach((c) => {
-        c.vid.pause();
-        c.vid.src = '';
-
-        const tex = c.mat.uniforms.uTexture.value;
-        if (tex && typeof tex.dispose === 'function') tex.dispose();
-
-        c.mesh.geometry.dispose();
-        c.mat.dispose();
+      renderer.domElement.removeEventListener('touchmove',  onTouchMove);
+      renderer.domElement.removeEventListener('touchend',   onTouchEnd);
+      window.removeEventListener             ('resize',     onResize);
+      cards.forEach(c => {
+        c.vid.pause(); c.vid.src = '';
+        c.mesh.geometry.dispose(); c.mat.dispose();
         scene.remove(c.mesh);
       });
-
       renderer.dispose();
       renderer.forceContextLoss();
       container.innerHTML = '';
