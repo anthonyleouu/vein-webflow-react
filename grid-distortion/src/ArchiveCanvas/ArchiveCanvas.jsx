@@ -22,6 +22,7 @@ export default function ArchiveCanvas() {
         will-change: transform;
         user-select: none;
         transition: opacity 0.35s, filter 0.35s;
+        transform-origin: top left;
       }
       .arc-item img {
         display: block;
@@ -90,6 +91,9 @@ export default function ArchiveCanvas() {
           const offX  = cellX + rand(CELL_W * 0.05, CELL_W - w - CELL_W * 0.05);
           const offY  = cellY + rand(CELL_H * 0.05, CELL_H - h - CELL_H * 0.05);
 
+          // Random default scale 0.6 - 1.0
+          const defaultScale = rand(0.6, 1.0);
+
           el.style.width  = w + 'px';
           el.style.height = h + 'px';
 
@@ -102,6 +106,7 @@ export default function ArchiveCanvas() {
 
           tiles.push({
             el, item, offX, offY, w, h,
+            defaultScale,
             speedX: rand(0.88, 1.12),
             speedY: rand(0.88, 1.12),
             mxAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
@@ -133,17 +138,17 @@ export default function ArchiveCanvas() {
 
         t.curX = x;
         t.curY = y;
-        t.el.style.transform = `translate(${x}px,${y}px)`;
+        t.el.style.transform = `translate(${x}px,${y}px) scale(${t.defaultScale})`;
       });
     }
 
     function tick() {
       animId = requestAnimationFrame(tick);
       if (!isDragging) {
-        velX *= 0.88;
-        velY *= 0.88;
-        if (Math.abs(velX) < 0.01) velX = 0;
-        if (Math.abs(velY) < 0.01) velY = 0;
+        velX *= 0.96;
+        velY *= 0.96;
+        if (Math.abs(velX) < 0.005) velX = 0;
+        if (Math.abs(velY) < 0.005) velY = 0;
         camX += velX;
         camY += velY;
       }
@@ -187,7 +192,7 @@ export default function ArchiveCanvas() {
       const t = scaledTile;
       scaledTile = null;
       t.el.classList.remove('scaled');
-      t.el.style.transform = `translate(${t.curX}px,${t.curY}px)`;
+      t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
       if (!hoveredTile) {
         clearDimmed();
         clearInfo();
@@ -205,7 +210,6 @@ export default function ArchiveCanvas() {
         const dy = e.clientY - dragStartY;
         if (Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
 
-        // Running average for smooth momentum on release
         const newVelX = e.clientX - lastDragX;
         const newVelY = e.clientY - lastDragY;
         velX = velX * 0.5 + newVelX * 0.5;
@@ -232,12 +236,12 @@ export default function ArchiveCanvas() {
     function onMouseUp() {
       isDragging = false;
       container.classList.remove('dragging');
-      // Reset dragMoved after click handler fires
       setTimeout(() => { dragMoved = false; }, 50);
     }
 
     function onMouseOver(e) {
       if (dragMoved) return;
+      if (scaledTile) return; // disable hover when item is scaled
       const arcEl = e.target.closest('.arc-item');
       if (!arcEl) { setHover(null); return; }
       const tile = tiles.find(t => t.el === arcEl);
@@ -246,6 +250,7 @@ export default function ArchiveCanvas() {
 
     function onMouseOut(e) {
       if (dragMoved) return;
+      if (scaledTile) return; // disable hover when item is scaled
       if (!e.relatedTarget || !e.relatedTarget.closest('.arc-item')) {
         setHover(null);
       }
