@@ -34,12 +34,10 @@ export default function ArchiveCanvas() {
         opacity: 0.15;
         filter: blur(4px);
       }
-      .arc-item.hovered {
-        z-index: 50;
-      }
+      .arc-item.hovered { z-index: 50; }
       .arc-item.scaled {
         z-index: 200;
-        transition: transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s !important;
+        transition: transform 0.5s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s !important;
       }
     `;
     document.head.appendChild(style);
@@ -51,16 +49,15 @@ export default function ArchiveCanvas() {
     let velX = 0, velY = 0;
     let mouseNX = 0, mouseNY = 0;
 
-    let isDragging   = false;
-    let dragStartX   = 0, dragStartY   = 0;
-    let dragCamX     = 0, dragCamY     = 0;
-    let lastDragX    = 0, lastDragY    = 0;
-    let dragMoved    = false; // track if actual drag happened
-    let dragDist     = 0;
+    let isDragging  = false;
+    let dragStartX  = 0, dragStartY  = 0;
+    let dragCamX    = 0, dragCamY    = 0;
+    let lastDragX   = 0, lastDragY   = 0;
+    let dragMoved   = false;
 
-    let hoveredTile  = null;
-    let scaledTile   = null;
-    let animId       = null;
+    let hoveredTile = null;
+    let scaledTile  = null;
+    let animId      = null;
 
     const W = window.innerWidth;
     const H = window.innerHeight;
@@ -82,7 +79,7 @@ export default function ArchiveCanvas() {
           const imgIndex = (row * COLS + col) % rawItems.length;
           const item     = rawItems[imgIndex];
 
-          const el  = document.createElement('div');
+          const el = document.createElement('div');
           el.className = 'arc-item';
 
           const w = randInt(CELL_W * 0.45, CELL_W * 0.82);
@@ -96,9 +93,9 @@ export default function ArchiveCanvas() {
           el.style.width  = w + 'px';
           el.style.height = h + 'px';
 
-          const img = document.createElement('img');
-          img.src      = item.image || '';
-          img.alt      = item.title || '';
+          const img     = document.createElement('img');
+          img.src       = item.image || '';
+          img.alt       = item.title || '';
           img.draggable = false;
           el.appendChild(img);
           container.appendChild(el);
@@ -109,7 +106,7 @@ export default function ArchiveCanvas() {
             speedY: rand(0.88, 1.12),
             mxAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
             myAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
-            curX: 0, curY: 0, // track current rendered position
+            curX: 0, curY: 0,
           });
         }
       }
@@ -124,12 +121,12 @@ export default function ArchiveCanvas() {
 
     function renderTiles() {
       tiles.forEach(t => {
-        if (t === scaledTile) return; // don't move scaled tile
+        if (t === scaledTile) return;
 
         let x = wrap(t.offX + camX * t.speedX, TOTAL_W);
         let y = wrap(t.offY + camY * t.speedY, TOTAL_H);
-        if (x > W  + 50) x -= TOTAL_W;
-        if (y > H + 50) y -= TOTAL_H;
+        if (x > W + 50)  x -= TOTAL_W;
+        if (y > H + 50)  y -= TOTAL_H;
 
         x += mouseNX * t.mxAmt;
         y += mouseNY * t.myAmt;
@@ -165,6 +162,10 @@ export default function ArchiveCanvas() {
       if (descEl)   descEl.textContent   = '';
     }
 
+    function clearDimmed() {
+      tiles.forEach(t => t.el.classList.remove('dimmed'));
+    }
+
     function setHover(tile) {
       if (tile === hoveredTile) return;
       if (hoveredTile) hoveredTile.el.classList.remove('hovered');
@@ -172,12 +173,26 @@ export default function ArchiveCanvas() {
       if (tile) {
         tile.el.classList.add('hovered');
         setInfo(tile.item);
-        tiles.forEach(t => {
-          t.el.classList.toggle('dimmed', t !== tile);
-        });
+        tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
       } else {
+        // Only clear dimmed if nothing is scaled
+        if (!scaledTile) clearInfo();
+        if (!scaledTile) clearDimmed();
+      }
+    }
+
+    function unscale() {
+      if (!scaledTile) return;
+      const t = scaledTile;
+      scaledTile = null;
+      t.el.classList.remove('scaled');
+      t.el.style.transform = `translate(${t.curX}px,${t.curY}px)`;
+      // Restore dimmed based on hover state
+      if (!hoveredTile) {
+        clearDimmed();
         clearInfo();
-        tiles.forEach(t => t.el.classList.remove('dimmed'));
+      } else {
+        tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
       }
     }
 
@@ -188,8 +203,7 @@ export default function ArchiveCanvas() {
       if (isDragging) {
         const dx = e.clientX - dragStartX;
         const dy = e.clientY - dragStartY;
-        dragDist = Math.sqrt(dx * dx + dy * dy);
-        if (dragDist > 4) dragMoved = true;
+        if (Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
 
         velX      = e.clientX - lastDragX;
         velY      = e.clientY - lastDragY;
@@ -204,17 +218,17 @@ export default function ArchiveCanvas() {
       if (e.button !== 0) return;
       isDragging = true;
       dragMoved  = false;
-      dragDist   = 0;
       dragStartX = e.clientX; dragStartY = e.clientY;
       dragCamX   = camX;      dragCamY   = camY;
       lastDragX  = e.clientX; lastDragY  = e.clientY;
-      velX = 0; velY = 0;
+      // keep velX/velY for momentum continuity
       container.classList.add('dragging');
     }
 
     function onMouseUp() {
       isDragging = false;
       container.classList.remove('dragging');
+      // velX/velY carry momentum automatically
     }
 
     function onMouseOver(e) {
@@ -232,45 +246,40 @@ export default function ArchiveCanvas() {
     }
 
     function onClick(e) {
-      if (dragMoved) return; // was a drag not a click
+      if (dragMoved) return;
 
       const arcEl = e.target.closest('.arc-item');
 
-      // Click outside — unscale
       if (!arcEl) {
-        if (scaledTile) {
-          scaledTile.el.classList.remove('scaled');
-          scaledTile = null;
-        }
+        unscale();
         return;
       }
 
       const tile = tiles.find(t => t.el === arcEl);
       if (!tile) return;
 
-      // Unscale previous
-      if (scaledTile && scaledTile !== tile) {
-        scaledTile.el.classList.remove('scaled');
-        scaledTile = null;
-      }
-
-      // Toggle
+      // Toggle off
       if (tile === scaledTile) {
-        tile.el.classList.remove('scaled');
-        scaledTile = null;
+        unscale();
         return;
       }
 
-      // Scale up to center
+      // Unscale previous first
+      if (scaledTile) unscale();
+
+      // Scale up
       scaledTile = tile;
       tile.el.classList.add('scaled');
 
-      const rect   = arcEl.getBoundingClientRect();
+      // Dim all others while scaled
+      tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
+
+      const rect   = tile.el.getBoundingClientRect();
       const scaleF = Math.min(1.5, (W * 0.5) / rect.width);
       const dx     = W / 2 - (rect.left + rect.width  / 2);
       const dy     = H / 2 - (rect.top  + rect.height / 2);
 
-      arcEl.style.transform = `translate(${tile.curX + dx}px, ${tile.curY + dy}px) scale(${scaleF})`;
+      tile.el.style.transform = `translate(${tile.curX + dx}px,${tile.curY + dy}px) scale(${scaleF})`;
     }
 
     container.addEventListener('mousemove',  onMouseMove);
