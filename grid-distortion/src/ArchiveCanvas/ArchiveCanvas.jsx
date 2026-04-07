@@ -12,17 +12,16 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // Inject styles
     const style = document.createElement('style');
     style.textContent = `
-      #archive-root { cursor: grab; }
+      #archive-root { cursor: grab; overflow: hidden; }
       #archive-root.dragging { cursor: grabbing; }
       .arc-item {
         position: absolute;
         left: 0; top: 0;
         will-change: transform;
-        transition: opacity 0.35s, filter 0.35s;
         user-select: none;
+        transition: opacity 0.35s, filter 0.35s;
       }
       .arc-item img {
         display: block;
@@ -30,7 +29,6 @@ export default function ArchiveCanvas() {
         height: 100%;
         object-fit: cover;
         pointer-events: none;
-        draggable: false;
       }
       .arc-item.dimmed {
         opacity: 0.15;
@@ -39,43 +37,44 @@ export default function ArchiveCanvas() {
       .arc-item.hovered {
         z-index: 50;
       }
+      .arc-item.scaled {
+        z-index: 200;
+        transition: transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s !important;
+      }
     `;
     document.head.appendChild(style);
 
-    let rawItems  = [];  // from API
-    let tiles     = [];  // { el, imgIndex, offX, offY, w, h, speedX, speedY }
+    let rawItems = [];
+    let tiles    = [];
 
-    // Canvas offset (drag)
     let camX = 0, camY = 0;
     let velX = 0, velY = 0;
-
-    // Mouse position for parallax
     let mouseNX = 0, mouseNY = 0;
 
-    let isDragging = false;
-    let dragStartX = 0, dragStartY = 0;
-    let dragCamX = 0, dragCamY = 0;
-    let lastDragX = 0, lastDragY = 0;
+    let isDragging   = false;
+    let dragStartX   = 0, dragStartY   = 0;
+    let dragCamX     = 0, dragCamY     = 0;
+    let lastDragX    = 0, lastDragY    = 0;
+    let dragMoved    = false; // track if actual drag happened
+    let dragDist     = 0;
 
-    let hoveredTile = null;
-    let animId = null;
+    let hoveredTile  = null;
+    let scaledTile   = null;
+    let animId       = null;
 
     const W = window.innerWidth;
     const H = window.innerHeight;
 
-    // Tile grid config
-    // We create a large grid of tiles. Each tile has a random offset within its cell.
-    const COLS       = 6;
-    const ROWS       = 6;
-    const CELL_W     = Math.round(W * 0.38);
-    const CELL_H     = Math.round(H * 0.45);
-    const TOTAL_W    = COLS * CELL_W;
-    const TOTAL_H    = ROWS * CELL_H;
+    const COLS    = 6;
+    const ROWS    = 6;
+    const CELL_W  = Math.round(W * 0.38);
+    const CELL_H  = Math.round(H * 0.45);
+    const TOTAL_W = COLS * CELL_W;
+    const TOTAL_H = ROWS * CELL_H;
 
     function buildTiles() {
       container.innerHTML = '';
       tiles = [];
-
       if (!rawItems.length) return;
 
       for (let row = 0; row < ROWS; row++) {
@@ -83,14 +82,12 @@ export default function ArchiveCanvas() {
           const imgIndex = (row * COLS + col) % rawItems.length;
           const item     = rawItems[imgIndex];
 
-          const el = document.createElement('div');
+          const el  = document.createElement('div');
           el.className = 'arc-item';
 
-          // Random size within cell
-          const w = randInt(CELL_W * 0.45, CELL_W * 0.85);
-          const h = randInt(CELL_H * 0.45, CELL_H * 0.85);
+          const w = randInt(CELL_W * 0.45, CELL_W * 0.82);
+          const h = randInt(CELL_H * 0.45, CELL_H * 0.82);
 
-          // Random offset within cell so items don't all align
           const cellX = col * CELL_W;
           const cellY = row * CELL_H;
           const offX  = cellX + rand(CELL_W * 0.05, CELL_W - w - CELL_W * 0.05);
@@ -100,56 +97,51 @@ export default function ArchiveCanvas() {
           el.style.height = h + 'px';
 
           const img = document.createElement('img');
-          img.src = item.image || '';
-          img.alt = item.title || '';
+          img.src      = item.image || '';
+          img.alt      = item.title || '';
           img.draggable = false;
           el.appendChild(img);
-
           container.appendChild(el);
 
-          // Random parallax speed (subtle — between 0.9 and 1.1)
-          const speedX = rand(0.88, 1.12);
-          const speedY = rand(0.88, 1.12);
-
-          // Mouse parallax amount (5-10px)
-          const mxAmt = rand(5, 10) * (Math.random() > 0.5 ? 1 : -1);
-          const myAmt = rand(5, 10) * (Math.random() > 0.5 ? 1 : -1);
-
-          tiles.push({ el, item, offX, offY, w, h, speedX, speedY, mxAmt, myAmt });
+          tiles.push({
+            el, item, offX, offY, w, h,
+            speedX: rand(0.88, 1.12),
+            speedY: rand(0.88, 1.12),
+            mxAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
+            myAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
+            curX: 0, curY: 0, // track current rendered position
+          });
         }
       }
 
-      // Start camera centered so items fill screen
       camX = -(TOTAL_W / 2 - W / 2);
       camY = -(TOTAL_H / 2 - H / 2);
     }
 
-    function wrapValue(val, total) {
+    function wrap(val, total) {
       return ((val % total) + total) % total;
     }
 
     function renderTiles() {
-      tiles.forEach(function(t) {
-        // Wrap position for infinite tiling
-        let x = wrapValue(t.offX + camX * t.speedX, TOTAL_W);
-        let y = wrapValue(t.offY + camY * t.speedY, TOTAL_H);
+      tiles.forEach(t => {
+        if (t === scaledTile) return; // don't move scaled tile
 
-        // Shift so items wrap from opposite side
-        // We need to check if item would be off screen and wrap it
-        if (x > W + 50) x -= TOTAL_W;
+        let x = wrap(t.offX + camX * t.speedX, TOTAL_W);
+        let y = wrap(t.offY + camY * t.speedY, TOTAL_H);
+        if (x > W  + 50) x -= TOTAL_W;
         if (y > H + 50) y -= TOTAL_H;
 
-        // Mouse parallax on top
         x += mouseNX * t.mxAmt;
         y += mouseNY * t.myAmt;
 
-        t.el.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+        t.curX = x;
+        t.curY = y;
+        t.el.style.transform = `translate(${x}px,${y}px)`;
       });
     }
 
     function tick() {
       animId = requestAnimationFrame(tick);
-
       if (!isDragging) {
         velX *= 0.88;
         velY *= 0.88;
@@ -158,7 +150,6 @@ export default function ArchiveCanvas() {
         camX += velX;
         camY += velY;
       }
-
       renderTiles();
     }
 
@@ -176,19 +167,13 @@ export default function ArchiveCanvas() {
 
     function setHover(tile) {
       if (tile === hoveredTile) return;
-      // Clear previous
-      if (hoveredTile) {
-        hoveredTile.el.classList.remove('hovered');
-      }
+      if (hoveredTile) hoveredTile.el.classList.remove('hovered');
       hoveredTile = tile;
-
       if (tile) {
         tile.el.classList.add('hovered');
         setInfo(tile.item);
-        // Dim all others
         tiles.forEach(t => {
-          if (t !== tile) t.el.classList.add('dimmed');
-          else t.el.classList.remove('dimmed');
+          t.el.classList.toggle('dimmed', t !== tile);
         });
       } else {
         clearInfo();
@@ -196,16 +181,20 @@ export default function ArchiveCanvas() {
       }
     }
 
-    // Events
     function onMouseMove(e) {
       mouseNX = (e.clientX / W - 0.5);
       mouseNY = (e.clientY / H - 0.5);
 
       if (isDragging) {
-        velX  = e.clientX - lastDragX;
-        velY  = e.clientY - lastDragY;
-        camX  = dragCamX + (e.clientX - dragStartX);
-        camY  = dragCamY + (e.clientY - dragStartY);
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        dragDist = Math.sqrt(dx * dx + dy * dy);
+        if (dragDist > 4) dragMoved = true;
+
+        velX      = e.clientX - lastDragX;
+        velY      = e.clientY - lastDragY;
+        camX      = dragCamX + dx;
+        camY      = dragCamY + dy;
         lastDragX = e.clientX;
         lastDragY = e.clientY;
       }
@@ -214,26 +203,24 @@ export default function ArchiveCanvas() {
     function onMouseDown(e) {
       if (e.button !== 0) return;
       isDragging = true;
+      dragMoved  = false;
+      dragDist   = 0;
       dragStartX = e.clientX; dragStartY = e.clientY;
-      dragCamX = camX; dragCamY = camY;
-      lastDragX = e.clientX; lastDragY = e.clientY;
+      dragCamX   = camX;      dragCamY   = camY;
+      lastDragX  = e.clientX; lastDragY  = e.clientY;
       velX = 0; velY = 0;
       container.classList.add('dragging');
     }
 
-    function onMouseUp(e) {
-      if (!isDragging) return;
+    function onMouseUp() {
       isDragging = false;
       container.classList.remove('dragging');
     }
 
     function onMouseOver(e) {
-      if (isDragging) return;
+      if (dragMoved) return;
       const arcEl = e.target.closest('.arc-item');
-      if (!arcEl) {
-        setHover(null);
-        return;
-      }
+      if (!arcEl) { setHover(null); return; }
       const tile = tiles.find(t => t.el === arcEl);
       if (tile) setHover(tile);
     }
@@ -245,47 +232,45 @@ export default function ArchiveCanvas() {
     }
 
     function onClick(e) {
-      if (isDragging) return;
+      if (dragMoved) return; // was a drag not a click
+
       const arcEl = e.target.closest('.arc-item');
-      if (!arcEl) return;
+
+      // Click outside — unscale
+      if (!arcEl) {
+        if (scaledTile) {
+          scaledTile.el.classList.remove('scaled');
+          scaledTile = null;
+        }
+        return;
+      }
 
       const tile = tiles.find(t => t.el === arcEl);
       if (!tile) return;
 
-      // Toggle scale
-      if (arcEl.dataset.scaled === '1') {
-        arcEl.dataset.scaled = '0';
-        arcEl.style.transition = 'transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s';
-        arcEl.style.zIndex = '';
-        // Restore normal render on next frame
+      // Unscale previous
+      if (scaledTile && scaledTile !== tile) {
+        scaledTile.el.classList.remove('scaled');
+        scaledTile = null;
+      }
+
+      // Toggle
+      if (tile === scaledTile) {
+        tile.el.classList.remove('scaled');
+        scaledTile = null;
         return;
       }
 
-      arcEl.dataset.scaled = '1';
-      arcEl.style.zIndex = '200';
-      arcEl.style.transition = 'transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s';
+      // Scale up to center
+      scaledTile = tile;
+      tile.el.classList.add('scaled');
 
-      // Center + scale
       const rect   = arcEl.getBoundingClientRect();
-      const scaleF = Math.min(1.5, (W * 0.55) / rect.width);
+      const scaleF = Math.min(1.5, (W * 0.5) / rect.width);
       const dx     = W / 2 - (rect.left + rect.width  / 2);
       const dy     = H / 2 - (rect.top  + rect.height / 2);
 
-      const cur    = new DOMMatrix(getComputedStyle(arcEl).transform);
-      arcEl.style.transform = `translate(${cur.m41 + dx}px, ${cur.m42 + dy}px) scale(${scaleF})`;
-
-      // Click anywhere else to dismiss
-      setTimeout(() => {
-        function dismiss(ev) {
-          if (!ev.target.closest('.arc-item') || ev.target.closest('.arc-item') !== arcEl) {
-            arcEl.dataset.scaled = '0';
-            arcEl.style.zIndex = '';
-            arcEl.style.transition = 'transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s, filter 0.35s';
-            window.removeEventListener('click', dismiss);
-          }
-        }
-        window.addEventListener('click', dismiss);
-      }, 50);
+      arcEl.style.transform = `translate(${tile.curX + dx}px, ${tile.curY + dy}px) scale(${scaleF})`;
     }
 
     container.addEventListener('mousemove',  onMouseMove);
