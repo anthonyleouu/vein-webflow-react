@@ -77,36 +77,28 @@ export default function ArchiveCanvas() {
 
       for (let row = 0; row < ROWS; row++) {
         for (let col = 0; col < COLS; col++) {
-          const imgIndex = (row * COLS + col) % rawItems.length;
-          const item     = rawItems[imgIndex];
-
-          const el = document.createElement('div');
-          el.className = 'arc-item';
-
-          const w = randInt(CELL_W * 0.45, CELL_W * 0.82);
-          const h = randInt(CELL_H * 0.45, CELL_H * 0.82);
-
-          const cellX = col * CELL_W;
-          const cellY = row * CELL_H;
-          const offX  = cellX + rand(CELL_W * 0.05, CELL_W - w - CELL_W * 0.05);
-          const offY  = cellY + rand(CELL_H * 0.05, CELL_H - h - CELL_H * 0.05);
-
-          // Random default scale 0.6 - 1.0
+          const imgIndex     = (row * COLS + col) % rawItems.length;
+          const item         = rawItems[imgIndex];
+          const el           = document.createElement('div');
+          el.className       = 'arc-item';
+          const w            = randInt(CELL_W * 0.45, CELL_W * 0.82);
+          const h            = randInt(CELL_H * 0.45, CELL_H * 0.82);
+          const cellX        = col * CELL_W;
+          const cellY        = row * CELL_H;
+          const offX         = cellX + rand(CELL_W * 0.05, CELL_W - w - CELL_W * 0.05);
+          const offY         = cellY + rand(CELL_H * 0.05, CELL_H - h - CELL_H * 0.05);
           const defaultScale = rand(0.6, 1.0);
-
-          el.style.width  = w + 'px';
-          el.style.height = h + 'px';
-
-          const img     = document.createElement('img');
-          img.src       = item.image || '';
-          img.alt       = item.title || '';
-          img.draggable = false;
+          el.style.width     = w + 'px';
+          el.style.height    = h + 'px';
+          const img          = document.createElement('img');
+          img.src            = item.image || '';
+          img.alt            = item.title || '';
+          img.draggable      = false;
           el.appendChild(img);
           container.appendChild(el);
 
           tiles.push({
-            el, item, offX, offY, w, h,
-            defaultScale,
+            el, item, offX, offY, w, h, defaultScale,
             speedX: rand(0.88, 1.12),
             speedY: rand(0.88, 1.12),
             mxAmt:  rand(5, 10) * (Math.random() > 0.5 ? 1 : -1),
@@ -130,8 +122,8 @@ export default function ArchiveCanvas() {
 
         let x = wrap(t.offX + camX * t.speedX, TOTAL_W);
         let y = wrap(t.offY + camY * t.speedY, TOTAL_H);
-        if (x > W + 50)  x -= TOTAL_W;
-        if (y > H + 50)  y -= TOTAL_H;
+        if (x > W + 50) x -= TOTAL_W;
+        if (y > H + 50) y -= TOTAL_H;
 
         x += mouseNX * t.mxAmt;
         y += mouseNY * t.myAmt;
@@ -189,16 +181,27 @@ export default function ArchiveCanvas() {
 
     function unscale() {
       if (!scaledTile) return;
-      const t = scaledTile;
+      const t   = scaledTile;
       scaledTile = null;
-      t.el.classList.remove('scaled');
-      t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
+
+      // Restore opacity of all items immediately
+      clearDimmed();
       if (!hoveredTile) {
-        clearDimmed();
         clearInfo();
       } else {
         tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
       }
+
+      // Animate tile back — remove scaled class after a frame so
+      // the transition still plays but renderTiles can take over after
+      t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
+      t.el.classList.remove('scaled');
+    }
+
+    function stopDrag() {
+      isDragging = false;
+      container.classList.remove('dragging');
+      setTimeout(() => { dragMoved = false; }, 50);
     }
 
     function onMouseMove(e) {
@@ -233,15 +236,12 @@ export default function ArchiveCanvas() {
       container.classList.add('dragging');
     }
 
-    function onMouseUp() {
-      isDragging = false;
-      container.classList.remove('dragging');
-      setTimeout(() => { dragMoved = false; }, 50);
-    }
+    function onMouseUp()        { stopDrag(); }
+    function onDocMouseLeave()  { if (isDragging) stopDrag(); }
 
     function onMouseOver(e) {
       if (dragMoved) return;
-      if (scaledTile) return; // disable hover when item is scaled
+      if (scaledTile) return;
       const arcEl = e.target.closest('.arc-item');
       if (!arcEl) { setHover(null); return; }
       const tile = tiles.find(t => t.el === arcEl);
@@ -250,7 +250,7 @@ export default function ArchiveCanvas() {
 
     function onMouseOut(e) {
       if (dragMoved) return;
-      if (scaledTile) return; // disable hover when item is scaled
+      if (scaledTile) return;
       if (!e.relatedTarget || !e.relatedTarget.closest('.arc-item')) {
         setHover(null);
       }
@@ -295,6 +295,7 @@ export default function ArchiveCanvas() {
     container.addEventListener('click',      onClick);
     window.addEventListener('mousemove',     onMouseMove);
     window.addEventListener('mouseup',       onMouseUp);
+    document.addEventListener('mouseleave',  onDocMouseLeave);
 
     fetch('https://vein-webflow-react.vercel.app/api/archive')
       .then(r => r.json())
@@ -317,6 +318,7 @@ export default function ArchiveCanvas() {
       container.removeEventListener('click',      onClick);
       window.removeEventListener('mousemove',     onMouseMove);
       window.removeEventListener('mouseup',       onMouseUp);
+      document.removeEventListener('mouseleave',  onDocMouseLeave);
       style.remove();
       container.innerHTML = '';
     };
