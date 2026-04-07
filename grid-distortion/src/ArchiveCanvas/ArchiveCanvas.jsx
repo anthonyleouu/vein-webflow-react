@@ -118,7 +118,7 @@ export default function ArchiveCanvas() {
 
     function renderTiles() {
       tiles.forEach(t => {
-        if (t === scaledTile) return;
+        if (t === scaledTile || t.returning) return;
 
         let x = wrap(t.offX + camX * t.speedX, TOTAL_W);
         let y = wrap(t.offY + camY * t.speedY, TOTAL_H);
@@ -180,23 +180,23 @@ export default function ArchiveCanvas() {
     }
 
     function unscale() {
-      if (!scaledTile) return;
-      const t   = scaledTile;
-      scaledTile = null;
+  if (!scaledTile) return;
+  const t    = scaledTile;
+  scaledTile = null;
 
-      // Restore opacity of all items immediately
-      clearDimmed();
-      if (!hoveredTile) {
-        clearInfo();
-      } else {
-        tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
-      }
+  // Restore opacity immediately
+  clearDimmed();
+  if (!hoveredTile) clearInfo();
+  else tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
 
-      // Animate tile back — remove scaled class after a frame so
-      // the transition still plays but renderTiles can take over after
-      t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
-      t.el.classList.remove('scaled');
-    }
+  // Mark as returning so renderTiles skips it during transition
+  t.returning = true;
+  t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
+  t.el.classList.remove('scaled');
+
+  // After transition completes, let renderTiles take over again
+  setTimeout(() => { t.returning = false; }, 520);
+}
 
     function stopDrag() {
       isDragging = false;
