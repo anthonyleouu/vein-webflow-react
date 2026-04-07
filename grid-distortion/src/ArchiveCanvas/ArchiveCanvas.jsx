@@ -175,9 +175,10 @@ export default function ArchiveCanvas() {
         setInfo(tile.item);
         tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
       } else {
-        // Only clear dimmed if nothing is scaled
-        if (!scaledTile) clearInfo();
-        if (!scaledTile) clearDimmed();
+        if (!scaledTile) {
+          clearInfo();
+          clearDimmed();
+        }
       }
     }
 
@@ -187,7 +188,6 @@ export default function ArchiveCanvas() {
       scaledTile = null;
       t.el.classList.remove('scaled');
       t.el.style.transform = `translate(${t.curX}px,${t.curY}px)`;
-      // Restore dimmed based on hover state
       if (!hoveredTile) {
         clearDimmed();
         clearInfo();
@@ -205,8 +205,12 @@ export default function ArchiveCanvas() {
         const dy = e.clientY - dragStartY;
         if (Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
 
-        velX      = e.clientX - lastDragX;
-        velY      = e.clientY - lastDragY;
+        // Running average for smooth momentum on release
+        const newVelX = e.clientX - lastDragX;
+        const newVelY = e.clientY - lastDragY;
+        velX = velX * 0.5 + newVelX * 0.5;
+        velY = velY * 0.5 + newVelY * 0.5;
+
         camX      = dragCamX + dx;
         camY      = dragCamY + dy;
         lastDragX = e.clientX;
@@ -221,14 +225,15 @@ export default function ArchiveCanvas() {
       dragStartX = e.clientX; dragStartY = e.clientY;
       dragCamX   = camX;      dragCamY   = camY;
       lastDragX  = e.clientX; lastDragY  = e.clientY;
-      // keep velX/velY for momentum continuity
+      velX = 0; velY = 0;
       container.classList.add('dragging');
     }
 
     function onMouseUp() {
       isDragging = false;
       container.classList.remove('dragging');
-      // velX/velY carry momentum automatically
+      // Reset dragMoved after click handler fires
+      setTimeout(() => { dragMoved = false; }, 50);
     }
 
     function onMouseOver(e) {
@@ -240,6 +245,7 @@ export default function ArchiveCanvas() {
     }
 
     function onMouseOut(e) {
+      if (dragMoved) return;
       if (!e.relatedTarget || !e.relatedTarget.closest('.arc-item')) {
         setHover(null);
       }
@@ -258,20 +264,15 @@ export default function ArchiveCanvas() {
       const tile = tiles.find(t => t.el === arcEl);
       if (!tile) return;
 
-      // Toggle off
       if (tile === scaledTile) {
         unscale();
         return;
       }
 
-      // Unscale previous first
       if (scaledTile) unscale();
 
-      // Scale up
       scaledTile = tile;
       tile.el.classList.add('scaled');
-
-      // Dim all others while scaled
       tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
 
       const rect   = tile.el.getBoundingClientRect();
