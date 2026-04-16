@@ -1,10 +1,6 @@
 import { useRef, useEffect } from 'react';
-import './Noise.css';
 
 const Noise = ({
-  patternSize = 250,
-  patternScaleX = 1,
-  patternScaleY = 1,
   patternRefreshInterval = 2,
   patternAlpha = 7.5
 }) => {
@@ -21,11 +17,8 @@ const Noise = ({
     const canvasSize = 1024;
 
     const resize = () => {
-      if (!canvas) return;
       canvas.width  = canvasSize;
       canvas.height = canvasSize;
-      canvas.style.width  = '100vw';
-      canvas.style.height = '100vh';
     };
 
     const drawGrain = () => {
@@ -42,9 +35,7 @@ const Noise = ({
     };
 
     const loop = () => {
-      if (frame % patternRefreshInterval === 0) {
-        drawGrain();
-      }
+      if (frame % patternRefreshInterval === 0) drawGrain();
       frame++;
       animationId = window.requestAnimationFrame(loop);
     };
@@ -57,13 +48,21 @@ const Noise = ({
       window.removeEventListener('resize', resize);
       window.cancelAnimationFrame(animationId);
     };
-  }, [patternSize, patternScaleX, patternScaleY, patternRefreshInterval, patternAlpha]);
+  }, [patternRefreshInterval, patternAlpha]);
 
   return (
     <canvas
-      className="noise-overlay"
       ref={grainRef}
-      style={{ imageRendering: 'pixelated' }}
+      style={{
+        position:        'fixed',
+        top:             0,
+        left:            0,
+        width:           '100vw',
+        height:          '100vh',
+        pointerEvents:   'none',
+        zIndex:          9999,
+        imageRendering:  'pixelated',
+      }}
     />
   );
 };
