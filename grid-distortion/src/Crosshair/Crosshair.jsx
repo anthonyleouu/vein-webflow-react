@@ -13,11 +13,12 @@ const Crosshair = ({ color = '#ff2425' }) => {
     let animId = null;
     let tlRunning = false;
     let tlStartTime = null;
-    const TL_DURATION = 500;
+    const TL_DURATION  = 500;
+    const MAX_OPACITY  = 0.5;
 
     const renderedStyles = {
-      tx: { previous: 0, current: 0, amt: 0.15 },
-      ty: { previous: 0, current: 0, amt: 0.15 },
+      tx: { previous: 0, current: 0, amt: 1 },
+      ty: { previous: 0, current: 0, amt: 1 },
     };
 
     const setOpacity = (val) => {
@@ -51,7 +52,7 @@ const Crosshair = ({ color = '#ff2425' }) => {
     const onFirstMove = () => {
       renderedStyles.tx.previous = renderedStyles.tx.current = mouse.x;
       renderedStyles.ty.previous = renderedStyles.ty.current = mouse.y;
-      setOpacity(1);
+      setOpacity(MAX_OPACITY);
       render();
       window.removeEventListener('mousemove', onFirstMove);
     };
@@ -91,7 +92,7 @@ const Crosshair = ({ color = '#ff2425' }) => {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousemove', onFirstMove);
     document.addEventListener('mouseleave', () => setOpacity(0));
-    document.addEventListener('mouseenter', () => setOpacity(1));
+    document.addEventListener('mouseenter', () => setOpacity(MAX_OPACITY));
 
     addLinkListeners();
 
