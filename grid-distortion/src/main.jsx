@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
-import Noise from './Noise/Noise';
+import Noise         from './Noise/Noise';
+import Crosshair     from './Crosshair/Crosshair';
 
 // Mount Noise globally
 const noiseContainer = document.getElementById('noise-root');
@@ -8,11 +9,16 @@ if (noiseContainer && !noiseContainer._mounted) {
   noiseContainer._mounted = true;
   const noiseRoot = createRoot(noiseContainer);
   noiseRoot.render(
-    <Noise
-      patternRefreshInterval={2}
-      patternAlpha={25}
-    />
+    <Noise patternRefreshInterval={2} patternAlpha={25} />
   );
+}
+
+// Mount Crosshair globally
+const crosshairContainer = document.getElementById('crosshair-root');
+if (crosshairContainer && !crosshairContainer._mounted) {
+  crosshairContainer._mounted = true;
+  const crosshairRoot = createRoot(crosshairContainer);
+  crosshairRoot.render(<Crosshair color="#ff2425" />);
 }
 
 window.mountAll = function mountAll() {
