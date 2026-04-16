@@ -9,7 +9,7 @@ export default function ProjectVisual() {
       .replace(/^\/work\//, '')
       .replace(/\/$/, '');
 
-    const GAP = 16;
+    const GAP = 32;
     let scrollY  = 0;
     let velocity = 0;
     let animId   = null;
@@ -95,7 +95,7 @@ export default function ProjectVisual() {
 
       // Measure after paint
       requestAnimationFrame(() => requestAnimationFrame(() => {
-        trackH = trackA.offsetHeight + GAP;
+        trackH = trackA.scrollHeight;
 
         // Track B (clone) — re-init videos separately
         const trackB = document.createElement('div');
@@ -118,22 +118,25 @@ export default function ProjectVisual() {
     }
 
     function tick() {
-      animId = requestAnimationFrame(tick);
+  animId = requestAnimationFrame(tick);
 
-      if (!isDragging) {
-        velocity *= 0.90;
-        if (Math.abs(velocity) < 0.02) velocity = 0;
-        scrollY += velocity;
-      }
+  if (!isDragging) {
+    velocity *= 0.90;
+    if (Math.abs(velocity) < 0.02) velocity = 0;
+    scrollY += velocity;
+  }
 
-      // Seamless wrap
-      if (scrollY >= trackH * 2) scrollY -= trackH;
-      if (scrollY <= 0)          scrollY += trackH;
+  // Seamless wrap — using exact trackH
+  const max = trackH;
+  if (scrollY >= max * 2) scrollY -= max;
+  if (scrollY <= 0)       scrollY += max;
 
-      const tracks = container.querySelectorAll('.pv-track');
-      if (tracks[0]) tracks[0].style.transform = `translateY(${-scrollY}px)`;
-      if (tracks[1]) tracks[1].style.transform = `translateY(${-scrollY + trackH}px)`;
-    }
+  const tracks = container.querySelectorAll('.pv-track');
+  const t0 = tracks[0];
+  const t1 = tracks[1];
+  if (t0) t0.style.transform = `translateY(${-scrollY}px)`;
+  if (t1) t1.style.transform = `translateY(${trackH - scrollY}px)`;
+}
 
     // ── Events ────────────────────────────────────────────────────────────
     let isDragging    = false;
