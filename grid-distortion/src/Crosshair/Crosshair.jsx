@@ -14,7 +14,7 @@ const Crosshair = ({ color = '#ff2425' }) => {
     let tlRunning = false;
     let tlStartTime = null;
     const TL_DURATION  = 500;
-    const MAX_OPACITY  = 0.3;
+    const MAX_OPACITY  = 0.2;
 
     const renderedStyles = {
       tx: { previous: 0, current: 0, amt: 1 },
