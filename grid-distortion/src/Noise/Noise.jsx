@@ -2,7 +2,7 @@ import { useRef, useEffect } from 'react';
 
 const Noise = ({
   patternRefreshInterval = 2,
-  patternAlpha = 15
+  patternAlpha = 25
 }) => {
   const grainRef = useRef(null);
 
@@ -14,15 +14,15 @@ const Noise = ({
 
     let frame = 0;
     let animationId;
-    const canvasSize = 1024;
+    let W = 0, H = 0;
 
     const resize = () => {
-      canvas.width  = canvasSize;
-      canvas.height = canvasSize;
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
     };
 
     const drawGrain = () => {
-      const imageData = ctx.createImageData(canvasSize, canvasSize);
+      const imageData = ctx.createImageData(W, H);
       const data = imageData.data;
       for (let i = 0; i < data.length; i += 4) {
         const value = Math.random() * 255;
@@ -54,14 +54,13 @@ const Noise = ({
     <canvas
       ref={grainRef}
       style={{
-        position:        'fixed',
-        top:             0,
-        left:            0,
-        width:           '100vw',
-        height:          '100vh',
-        pointerEvents:   'none',
-        zIndex:          9999,
-        imageRendering:  'pixelated',
+        position:       'fixed',
+        top:            0,
+        left:           0,
+        width:          '100vw',
+        height:         '100vh',
+        pointerEvents:  'none',
+        zIndex:         9999,
       }}
     />
   );
