@@ -164,20 +164,35 @@ export default function ArchiveCanvas() {
     }
 
     function setHover(tile) {
-      if (tile === hoveredTile) return;
-      if (hoveredTile) hoveredTile.el.classList.remove('hovered');
-      hoveredTile = tile;
-      if (tile) {
-        tile.el.classList.add('hovered');
-        setInfo(tile.item);
-        tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
-      } else {
-        if (!scaledTile) {
-          clearInfo();
-          clearDimmed();
-        }
+  if (tile === hoveredTile) return;
+  if (hoveredTile) hoveredTile.el.classList.remove('hovered');
+  hoveredTile = tile;
+  if (tile) {
+    tile.el.classList.add('hovered');
+    setInfo(tile.item);
+    tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
+
+    // Trigger text reveal on archive info elements
+    if (window.revealText) {
+      [numberEl, titleEl, descEl].forEach(function(el) {
+        if (el) window.revealText(el);
+      });
+    }
+
+  } else {
+    if (!scaledTile) {
+      clearInfo();
+      clearDimmed();
+
+      // Reset text reveal on hover out
+      if (window.resetText) {
+        [numberEl, titleEl, descEl].forEach(function(el) {
+          if (el) window.resetText(el);
+        });
       }
     }
+  }
+}
 
     function unscale() {
   if (!scaledTile) return;
