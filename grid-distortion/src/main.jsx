@@ -14,6 +14,7 @@ if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro
   const handleIntroComplete = () => {
     sessionStorage.setItem('intro-seen', '1');
     document.body.classList.remove('intro-active');
+    document.documentElement.classList.add('intro-done');
   };
 
   introRoot.render(<Intro onComplete={handleIntroComplete} />);
