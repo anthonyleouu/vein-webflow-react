@@ -194,16 +194,10 @@ export default function ArchiveCanvas() {
         tile.el.classList.add('hovered');
         setInfo(tile.item);
         tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
-        if (window.revealText) {
-          [numberEl, titleEl, descEl].forEach(el => { if (el) window.revealText(el); });
-        }
       } else {
         if (!scaledTile) {
           clearInfo();
           clearDimmed();
-          if (window.resetText) {
-            [numberEl, titleEl, descEl].forEach(el => { if (el) window.resetText(el); });
-          }
         }
       }
     }
