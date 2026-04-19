@@ -12,6 +12,11 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
+    // ✅ Clear info text immediately on mount — no leftover Webflow content
+    if (numberEl) numberEl.textContent = '';
+    if (titleEl)  titleEl.textContent  = '';
+    if (descEl)   descEl.textContent   = '';
+
     const style = document.createElement('style');
     style.textContent = `
       #archive-root { cursor: grab; overflow: hidden; }
@@ -23,6 +28,10 @@ export default function ArchiveCanvas() {
         user-select: none;
         transition: opacity 0.35s, filter 0.35s;
         transform-origin: top left;
+        opacity: 0;
+      }
+      .arc-item.arc-ready {
+        opacity: 1;
       }
       .arc-item img {
         display: block;
@@ -80,7 +89,7 @@ export default function ArchiveCanvas() {
           const imgIndex     = (row * COLS + col) % rawItems.length;
           const item         = rawItems[imgIndex];
           const el           = document.createElement('div');
-          el.className       = 'arc-item';
+          el.className       = 'arc-item'; // ✅ no arc-ready yet — starts opacity:0
           const w            = randInt(CELL_W * 0.45, CELL_W * 0.82);
           const h            = randInt(CELL_H * 0.45, CELL_H * 0.82);
           const cellX        = col * CELL_W;
@@ -164,54 +173,39 @@ export default function ArchiveCanvas() {
     }
 
     function setHover(tile) {
-  if (tile === hoveredTile) return;
-  if (hoveredTile) hoveredTile.el.classList.remove('hovered');
-  hoveredTile = tile;
-  if (tile) {
-    tile.el.classList.add('hovered');
-    setInfo(tile.item);
-    tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
-
-    // Trigger text reveal on archive info elements
-    if (window.revealText) {
-      [numberEl, titleEl, descEl].forEach(function(el) {
-        if (el) window.revealText(el);
-      });
-    }
-
-  } else {
-    if (!scaledTile) {
-      clearInfo();
-      clearDimmed();
-
-      // Reset text reveal on hover out
-      if (window.resetText) {
-        [numberEl, titleEl, descEl].forEach(function(el) {
-          if (el) window.resetText(el);
-        });
+      if (tile === hoveredTile) return;
+      if (hoveredTile) hoveredTile.el.classList.remove('hovered');
+      hoveredTile = tile;
+      if (tile) {
+        tile.el.classList.add('hovered');
+        setInfo(tile.item);
+        tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
+        if (window.revealText) {
+          [numberEl, titleEl, descEl].forEach(el => { if (el) window.revealText(el); });
+        }
+      } else {
+        if (!scaledTile) {
+          clearInfo();
+          clearDimmed();
+          if (window.resetText) {
+            [numberEl, titleEl, descEl].forEach(el => { if (el) window.resetText(el); });
+          }
+        }
       }
     }
-  }
-}
 
     function unscale() {
-  if (!scaledTile) return;
-  const t    = scaledTile;
-  scaledTile = null;
-
-  // Restore opacity immediately
-  clearDimmed();
-  if (!hoveredTile) clearInfo();
-  else tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
-
-  // Mark as returning so renderTiles skips it during transition
-  t.returning = true;
-  t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
-  t.el.classList.remove('scaled');
-
-  // After transition completes, let renderTiles take over again
-  setTimeout(() => { t.returning = false; }, 520);
-}
+      if (!scaledTile) return;
+      const t    = scaledTile;
+      scaledTile = null;
+      clearDimmed();
+      if (!hoveredTile) clearInfo();
+      else tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
+      t.returning = true;
+      t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
+      t.el.classList.remove('scaled');
+      setTimeout(() => { t.returning = false; }, 520);
+    }
 
     function stopDrag() {
       isDragging = false;
@@ -222,17 +216,14 @@ export default function ArchiveCanvas() {
     function onMouseMove(e) {
       mouseNX = (e.clientX / W - 0.5);
       mouseNY = (e.clientY / H - 0.5);
-
       if (isDragging) {
         const dx = e.clientX - dragStartX;
         const dy = e.clientY - dragStartY;
         if (Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
-
         const newVelX = e.clientX - lastDragX;
         const newVelY = e.clientY - lastDragY;
         velX = velX * 0.5 + newVelX * 0.5;
         velY = velY * 0.5 + newVelY * 0.5;
-
         camX      = dragCamX + dx;
         camY      = dragCamY + dy;
         lastDragX = e.clientX;
@@ -251,8 +242,8 @@ export default function ArchiveCanvas() {
       container.classList.add('dragging');
     }
 
-    function onMouseUp()        { stopDrag(); }
-    function onDocMouseLeave()  { if (isDragging) stopDrag(); }
+    function onMouseUp()       { stopDrag(); }
+    function onDocMouseLeave() { if (isDragging) stopDrag(); }
 
     function onMouseOver(e) {
       if (dragMoved) return;
@@ -273,33 +264,19 @@ export default function ArchiveCanvas() {
 
     function onClick(e) {
       if (dragMoved) return;
-
       const arcEl = e.target.closest('.arc-item');
-
-      if (!arcEl) {
-        unscale();
-        return;
-      }
-
+      if (!arcEl) { unscale(); return; }
       const tile = tiles.find(t => t.el === arcEl);
       if (!tile) return;
-
-      if (tile === scaledTile) {
-        unscale();
-        return;
-      }
-
+      if (tile === scaledTile) { unscale(); return; }
       if (scaledTile) unscale();
-
       scaledTile = tile;
       tile.el.classList.add('scaled');
       tiles.forEach(t => t.el.classList.toggle('dimmed', t !== tile));
-
       const rect   = tile.el.getBoundingClientRect();
       const scaleF = Math.min(1.5, (W * 0.5) / rect.width);
       const dx     = W / 2 - (rect.left + rect.width  / 2);
       const dy     = H / 2 - (rect.top  + rect.height / 2);
-
       tile.el.style.transform = `translate(${tile.curX + dx}px,${tile.curY + dy}px) scale(${scaleF})`;
     }
 
@@ -317,7 +294,14 @@ export default function ArchiveCanvas() {
       .then(data => {
         rawItems = data.items || [];
         buildTiles();
-        tick();
+
+        // ✅ Run one render pass first so tiles are correctly positioned,
+        //    THEN make them visible — no flash at translate(0,0)
+        renderTiles();
+        requestAnimationFrame(() => {
+          tiles.forEach(t => t.el.classList.add('arc-ready'));
+          tick();
+        });
       })
       .catch(err => {
         console.error('Archive fetch error:', err);
