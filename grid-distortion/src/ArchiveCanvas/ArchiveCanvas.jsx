@@ -152,21 +152,31 @@ export default function ArchiveCanvas() {
       renderTiles();
     }
 
+    function animateInfo(el, text) {
+      if (!el || !text) return;
+      // Reset to plain text so getLines can measure correctly
+      el.innerHTML = text;
+      el.classList.add('info-visible');
+      if (window.revealText) window.revealText(el);
+    }
+
     function setInfo(item) {
-      if (numberEl) { numberEl.textContent = item.count || '';               numberEl.classList.add('info-visible'); }
-      if (titleEl)  { titleEl.textContent  = item.title || item.name || '';  titleEl.classList.add('info-visible'); }
-      if (descEl)   { descEl.textContent   = item.description || '';         descEl.classList.add('info-visible'); }
+      animateInfo(numberEl, item.count || '');
+      animateInfo(titleEl,  item.title || item.name || '');
+      animateInfo(descEl,   item.description || '');
     }
 
     function clearInfo() {
       [numberEl, titleEl, descEl].forEach(el => {
-        if (el) el.classList.remove('info-visible');
+        if (!el) return;
+        el.classList.remove('info-visible');
+        if (window.resetText) window.resetText(el);
       });
       setTimeout(() => {
         if (hoveredTile) return;
-        if (numberEl) numberEl.textContent = '';
-        if (titleEl)  titleEl.textContent  = '';
-        if (descEl)   descEl.textContent   = '';
+        [numberEl, titleEl, descEl].forEach(el => {
+          if (el) el.innerHTML = '';
+        });
       }, 300);
     }
 
