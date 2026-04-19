@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback, createElement } from
 
 const gsap = window.gsap;
 
-// ─── Inline Noise (exact match to your site's Noise.jsx) ─────────────────────
+// ─── Inline Noise ─────────────────────────────────────────────────────────────
 const Noise = ({ patternRefreshInterval = 2, patternAlpha = 25 }) => {
   const grainRef = useRef(null);
 
@@ -164,7 +164,7 @@ const TextType = ({
 };
 
 // ─── Timing ───────────────────────────────────────────────────────────────────
-const PHRASE      = 'Vein Digital Studio';
+const PHRASE       = 'Vein Digital Studio';
 const TYPING_SPEED = 55;
 const VANISH_DELAY = PHRASE.length * TYPING_SPEED + 700;
 
@@ -172,16 +172,14 @@ const VANISH_DELAY = PHRASE.length * TYPING_SPEED + 700;
 export default function Intro({ onComplete }) {
   const textWrapRef = useRef(null);
   const cubeRef     = useRef(null);
-  const [phase, setPhase] = useState('typing'); // typing | vanish | expand | done
+  const [phase, setPhase] = useState('typing');
 
-  // Phase: typing → trigger vanish after text finishes
   useEffect(() => {
     if (phase !== 'typing') return;
     const t = setTimeout(() => setPhase('vanish'), VANISH_DELAY);
     return () => clearTimeout(t);
   }, [phase]);
 
-  // Phase: vanish → fade out text wrapper
   useEffect(() => {
     if (phase !== 'vanish') return;
     const el = textWrapRef.current;
@@ -194,7 +192,6 @@ export default function Intro({ onComplete }) {
     });
   }, [phase]);
 
-  // Phase: expand → cube scales to full screen
   useEffect(() => {
     if (phase !== 'expand') return;
     const cube = cubeRef.current;
@@ -202,8 +199,8 @@ export default function Intro({ onComplete }) {
     gsap.set(cube, { scale: 0, opacity: 1 });
     gsap.to(cube, {
       scale: 1,
-      duration: 0.75,
-      ease: 'power4.inOut',
+      duration: 1.2,           // ✅ slower
+      ease: 'power3.out',      // ✅ ease out at the end
       onComplete: () => {
         setPhase('done');
         if (onComplete) onComplete();
@@ -225,10 +222,8 @@ export default function Intro({ onComplete }) {
       overflow: 'hidden',
     }}>
 
-      {/* Noise — same component, same settings as your site */}
       <Noise patternRefreshInterval={2} patternAlpha={25} />
 
-      {/* ( Vein Digital Studio_ ) */}
       {(phase === 'typing' || phase === 'vanish') && (
         <div
           ref={textWrapRef}
@@ -239,9 +234,10 @@ export default function Intro({ onComplete }) {
             alignItems: 'center',
             gap: '0.2em',
             color: '#ff2425',
-            fontFamily: 'inherit',
-            fontSize: 'clamp(0.9rem, 2vw, 1.4rem)',
-            letterSpacing: '0.06em',
+            fontFamily: '"Inter", sans-serif', // ✅ Inter font
+            fontSize: 'clamp(0.7rem, 1.2vw, 1rem)', // ✅ smaller
+            letterSpacing: '0.08em',
+            fontWeight: 400,
             userSelect: 'none',
           }}
         >
@@ -258,13 +254,13 @@ export default function Intro({ onComplete }) {
               display: 'inline-flex',
               alignItems: 'center',
               color: '#ff2425',
+              fontFamily: '"Inter", sans-serif',
             }}
           />
           <span>)</span>
         </div>
       )}
 
-      {/* Expanding cube */}
       <div
         ref={cubeRef}
         style={{
