@@ -12,10 +12,13 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // Clear info text immediately on mount
-    if (numberEl) { numberEl.textContent = ''; numberEl.style.opacity = '0'; }
-    if (titleEl)  { titleEl.textContent  = ''; titleEl.style.opacity  = '0'; }
-    if (descEl)   { descEl.textContent   = ''; descEl.style.opacity   = '0'; }
+    // Clear info text immediately on mount — force via style to beat any CSS
+    [numberEl, titleEl, descEl].forEach(el => {
+      if (!el) return;
+      el.textContent = '';
+      el.style.setProperty('opacity', '0', 'important');
+      el.style.setProperty('transition', 'opacity 0.3s ease', 'important');
+    });
 
     const style = document.createElement('style');
     style.textContent = `
@@ -28,6 +31,7 @@ export default function ArchiveCanvas() {
         user-select: none;
         transform-origin: top left;
         opacity: 0;
+        transition: opacity 0.7s ease, filter 0.35s;
       }
       .arc-item img {
         display: block;
@@ -154,15 +158,15 @@ export default function ArchiveCanvas() {
     }
 
     function setInfo(item) {
-      if (numberEl) { numberEl.textContent = item.count || '';               numberEl.style.opacity = '1'; }
-      if (titleEl)  { titleEl.textContent  = item.title || item.name || '';  titleEl.style.opacity  = '1'; }
-      if (descEl)   { descEl.textContent   = item.description || '';         descEl.style.opacity   = '1'; }
+      if (numberEl) { numberEl.textContent = item.count || '';              numberEl.style.setProperty('opacity', '1', 'important'); }
+      if (titleEl)  { titleEl.textContent  = item.title || item.name || ''; titleEl.style.setProperty('opacity', '1', 'important'); }
+      if (descEl)   { descEl.textContent   = item.description || '';        descEl.style.setProperty('opacity', '1', 'important'); }
     }
 
     function clearInfo() {
-      if (numberEl) numberEl.style.opacity = '0';
-      if (titleEl)  titleEl.style.opacity  = '0';
-      if (descEl)   descEl.style.opacity   = '0';
+      [numberEl, titleEl, descEl].forEach(el => {
+        if (el) el.style.setProperty('opacity', '0', 'important');
+      });
       setTimeout(() => {
         if (hoveredTile) return;
         if (numberEl) numberEl.textContent = '';
@@ -298,15 +302,18 @@ export default function ArchiveCanvas() {
         rawItems = data.items || [];
         buildTiles();
 
-        // Position tiles first, then fade each in with a random delay
-        renderTiles();
+        // First rAF: position all tiles correctly
         requestAnimationFrame(() => {
-          tiles.forEach(t => {
-            const delay = (Math.random() * 0.2 + 0.1).toFixed(2);
-            t.el.style.transition = `opacity 0.6s ease ${delay}s, filter 0.35s`;
-            t.el.style.opacity = '1';
+          renderTiles();
+          // Second rAF: browser has painted at opacity:0, now trigger fade-in
+          requestAnimationFrame(() => {
+            tiles.forEach(t => {
+              const delay = (Math.random() * 0.2 + 0.1).toFixed(2);
+              t.el.style.transitionDelay = delay + 's';
+              t.el.style.opacity = '1';
+            });
+            tick();
           });
-          tick();
         });
       })
       .catch(err => {
