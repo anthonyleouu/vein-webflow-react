@@ -12,13 +12,18 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // Clear info text immediately on mount — force via style to beat any CSS
+    // Kill visibility immediately, then switch to opacity-based fade once ready
     [numberEl, titleEl, descEl].forEach(el => {
       if (!el) return;
       el.textContent = '';
+      el.style.setProperty('visibility', 'visible', 'important');
       el.style.setProperty('opacity', '0', 'important');
       el.style.setProperty('transition', 'opacity 0.3s ease', 'important');
     });
+
+    // Remove the hard-hide stylesheet now that JS has taken over
+    const hideSheet = document.getElementById('archive-hide');
+    if (hideSheet) hideSheet.remove();
 
     const style = document.createElement('style');
     style.textContent = `
