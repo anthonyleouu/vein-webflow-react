@@ -2,6 +2,20 @@ import { createRoot } from 'react-dom/client';
 import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
 import Noise         from './Noise/Noise';
 import Crosshair     from './Crosshair/Crosshair';
+import Intro         from './Intro';
+
+// Mount Intro (first visit per session only)
+const introContainer = document.getElementById('intro-root');
+if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro-seen')) {
+  introContainer._mounted = true;
+  const introRoot = createRoot(introContainer);
+
+  const handleIntroComplete = () => {
+    sessionStorage.setItem('intro-seen', '1');
+  };
+
+  introRoot.render(<Intro onComplete={handleIntroComplete} />);
+}
 
 // Mount Noise globally
 const noiseContainer = document.getElementById('noise-root');
