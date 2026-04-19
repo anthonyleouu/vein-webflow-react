@@ -57,9 +57,9 @@ const Crosshair = ({ color = '#ff2425' }) => {
       window.removeEventListener('mousemove', onFirstMove);
     };
 
-    const runTurbulence = () => {
+    const runTurbulence = (startT = 0) => {
       tlRunning = true;
-      tlStartTime = performance.now();
+      tlStartTime = performance.now() - startT * TL_DURATION;
       const animate = (now) => {
         if (!tlRunning) return;
         const t = Math.min((now - tlStartTime) / TL_DURATION, 1);
@@ -80,7 +80,12 @@ const Crosshair = ({ color = '#ff2425' }) => {
     };
 
     const enter = () => runTurbulence();
-    const leave = () => { tlRunning = false; };
+    const leave = () => {
+      if (!tlRunning) return;
+      const elapsed  = performance.now() - tlStartTime;
+      const currentT = Math.min(elapsed / TL_DURATION, 1);
+      runTurbulence(currentT);
+    };
 
     const addLinkListeners = () => {
       document.querySelectorAll('a').forEach(link => {
