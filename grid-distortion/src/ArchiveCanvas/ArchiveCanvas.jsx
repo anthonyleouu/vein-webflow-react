@@ -12,10 +12,10 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // ✅ Clear info text immediately on mount — no leftover Webflow content
-    if (numberEl) numberEl.textContent = '';
-    if (titleEl)  titleEl.textContent  = '';
-    if (descEl)   descEl.textContent   = '';
+    // Clear info text immediately on mount
+    if (numberEl) { numberEl.textContent = ''; numberEl.style.opacity = '0'; }
+    if (titleEl)  { titleEl.textContent  = ''; titleEl.style.opacity  = '0'; }
+    if (descEl)   { descEl.textContent   = ''; descEl.style.opacity   = '0'; }
 
     const style = document.createElement('style');
     style.textContent = `
@@ -26,12 +26,8 @@ export default function ArchiveCanvas() {
         left: 0; top: 0;
         will-change: transform;
         user-select: none;
-        transition: opacity 0.35s, filter 0.35s;
         transform-origin: top left;
         opacity: 0;
-      }
-      .arc-item.arc-ready {
-        opacity: 1;
       }
       .arc-item img {
         display: block;
@@ -41,8 +37,9 @@ export default function ArchiveCanvas() {
         pointer-events: none;
       }
       .arc-item.dimmed {
-        opacity: 0.15;
+        opacity: 0.15 !important;
         filter: blur(4px);
+        transition: opacity 0.35s, filter 0.35s !important;
       }
       .arc-item.hovered { z-index: 50; }
       .arc-item.scaled {
@@ -89,7 +86,7 @@ export default function ArchiveCanvas() {
           const imgIndex     = (row * COLS + col) % rawItems.length;
           const item         = rawItems[imgIndex];
           const el           = document.createElement('div');
-          el.className       = 'arc-item'; // ✅ no arc-ready yet — starts opacity:0
+          el.className       = 'arc-item';
           const w            = randInt(CELL_W * 0.45, CELL_W * 0.82);
           const h            = randInt(CELL_H * 0.45, CELL_H * 0.82);
           const cellX        = col * CELL_W;
@@ -157,15 +154,21 @@ export default function ArchiveCanvas() {
     }
 
     function setInfo(item) {
-      if (numberEl) numberEl.textContent = item.count || '';
-      if (titleEl)  titleEl.textContent  = item.title || item.name || '';
-      if (descEl)   descEl.textContent   = item.description || '';
+      if (numberEl) { numberEl.textContent = item.count || '';               numberEl.style.opacity = '1'; }
+      if (titleEl)  { titleEl.textContent  = item.title || item.name || '';  titleEl.style.opacity  = '1'; }
+      if (descEl)   { descEl.textContent   = item.description || '';         descEl.style.opacity   = '1'; }
     }
 
     function clearInfo() {
-      if (numberEl) numberEl.textContent = '';
-      if (titleEl)  titleEl.textContent  = '';
-      if (descEl)   descEl.textContent   = '';
+      if (numberEl) numberEl.style.opacity = '0';
+      if (titleEl)  titleEl.style.opacity  = '0';
+      if (descEl)   descEl.style.opacity   = '0';
+      setTimeout(() => {
+        if (hoveredTile) return;
+        if (numberEl) numberEl.textContent = '';
+        if (titleEl)  titleEl.textContent  = '';
+        if (descEl)   descEl.textContent   = '';
+      }, 300);
     }
 
     function clearDimmed() {
@@ -295,11 +298,14 @@ export default function ArchiveCanvas() {
         rawItems = data.items || [];
         buildTiles();
 
-        // ✅ Run one render pass first so tiles are correctly positioned,
-        //    THEN make them visible — no flash at translate(0,0)
+        // Position tiles first, then fade each in with a random delay
         renderTiles();
         requestAnimationFrame(() => {
-          tiles.forEach(t => t.el.classList.add('arc-ready'));
+          tiles.forEach(t => {
+            const delay = (Math.random() * 0.2 + 0.1).toFixed(2);
+            t.el.style.transition = `opacity 0.6s ease ${delay}s, filter 0.35s`;
+            t.el.style.opacity = '1';
+          });
           tick();
         });
       })
