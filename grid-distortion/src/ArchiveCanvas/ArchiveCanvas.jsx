@@ -12,19 +12,14 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
+    // Just clear any leftover text — CSS in head handles opacity
+    [numberEl, titleEl, descEl].forEach(el => {
+      if (!el) return;
+      el.textContent = '';
+    });
+
     const style = document.createElement('style');
     style.textContent = `
-      #archive-number,
-      #archive-title,
-      #archive-desc {
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      }
-      #archive-number.info-visible,
-      #archive-title.info-visible,
-      #archive-desc.info-visible {
-        opacity: 1;
-      }
       #archive-root { cursor: grab; overflow: hidden; }
       #archive-root.dragging { cursor: grabbing; }
       .arc-item {
@@ -82,13 +77,6 @@ export default function ArchiveCanvas() {
     const CELL_H  = Math.round(H * 0.45);
     const TOTAL_W = COLS * CELL_W;
     const TOTAL_H = ROWS * CELL_H;
-
-    // Hide info els immediately via class — our injected style handles it
-    [numberEl, titleEl, descEl].forEach(el => {
-      if (!el) return;
-      el.textContent = '';
-      el.classList.remove('info-visible');
-    });
 
     function buildTiles() {
       container.innerHTML = '';
