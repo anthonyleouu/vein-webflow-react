@@ -12,21 +12,19 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // Kill visibility immediately, then switch to opacity-based fade once ready
-    [numberEl, titleEl, descEl].forEach(el => {
-      if (!el) return;
-      el.textContent = '';
-      el.style.setProperty('visibility', 'visible', 'important');
-      el.style.setProperty('opacity', '0', 'important');
-      el.style.setProperty('transition', 'opacity 0.3s ease', 'important');
-    });
-
-    // Remove the hard-hide stylesheet now that JS has taken over
-    const hideSheet = document.getElementById('archive-hide');
-    if (hideSheet) hideSheet.remove();
-
     const style = document.createElement('style');
     style.textContent = `
+      #archive-number,
+      #archive-title,
+      #archive-desc {
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      #archive-number.info-visible,
+      #archive-title.info-visible,
+      #archive-desc.info-visible {
+        opacity: 1;
+      }
       #archive-root { cursor: grab; overflow: hidden; }
       #archive-root.dragging { cursor: grabbing; }
       .arc-item {
@@ -85,6 +83,13 @@ export default function ArchiveCanvas() {
     const TOTAL_W = COLS * CELL_W;
     const TOTAL_H = ROWS * CELL_H;
 
+    // Hide info els immediately via class — our injected style handles it
+    [numberEl, titleEl, descEl].forEach(el => {
+      if (!el) return;
+      el.textContent = '';
+      el.classList.remove('info-visible');
+    });
+
     function buildTiles() {
       container.innerHTML = '';
       tiles = [];
@@ -134,15 +139,12 @@ export default function ArchiveCanvas() {
     function renderTiles() {
       tiles.forEach(t => {
         if (t === scaledTile || t.returning) return;
-
         let x = wrap(t.offX + camX * t.speedX, TOTAL_W);
         let y = wrap(t.offY + camY * t.speedY, TOTAL_H);
         if (x > W + 50) x -= TOTAL_W;
         if (y > H + 50) y -= TOTAL_H;
-
         x += mouseNX * t.mxAmt;
         y += mouseNY * t.myAmt;
-
         t.curX = x;
         t.curY = y;
         t.el.style.transform = `translate(${x}px,${y}px) scale(${t.defaultScale})`;
@@ -163,14 +165,14 @@ export default function ArchiveCanvas() {
     }
 
     function setInfo(item) {
-      if (numberEl) { numberEl.textContent = item.count || '';              numberEl.style.setProperty('opacity', '1', 'important'); }
-      if (titleEl)  { titleEl.textContent  = item.title || item.name || ''; titleEl.style.setProperty('opacity', '1', 'important'); }
-      if (descEl)   { descEl.textContent   = item.description || '';        descEl.style.setProperty('opacity', '1', 'important'); }
+      if (numberEl) { numberEl.textContent = item.count || '';               numberEl.classList.add('info-visible'); }
+      if (titleEl)  { titleEl.textContent  = item.title || item.name || '';  titleEl.classList.add('info-visible'); }
+      if (descEl)   { descEl.textContent   = item.description || '';         descEl.classList.add('info-visible'); }
     }
 
     function clearInfo() {
       [numberEl, titleEl, descEl].forEach(el => {
-        if (el) el.style.setProperty('opacity', '0', 'important');
+        if (el) el.classList.remove('info-visible');
       });
       setTimeout(() => {
         if (hoveredTile) return;
@@ -306,11 +308,8 @@ export default function ArchiveCanvas() {
       .then(data => {
         rawItems = data.items || [];
         buildTiles();
-
-        // First rAF: position all tiles correctly
         requestAnimationFrame(() => {
           renderTiles();
-          // Second rAF: browser has painted at opacity:0, now trigger fade-in
           requestAnimationFrame(() => {
             tiles.forEach(t => {
               const delay = (Math.random() * 0.2 + 0.1).toFixed(2);
