@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback, createElement } from 'react';
-import { gsap } from 'gsap';
+
+const gsap = window.gsap;
 
 // ─── Inline Noise (exact match to your site's Noise.jsx) ─────────────────────
 const Noise = ({ patternRefreshInterval = 2, patternAlpha = 25 }) => {

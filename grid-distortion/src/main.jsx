@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client';
 import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
 import Noise         from './Noise/Noise';
 import Crosshair     from './Crosshair/Crosshair';
-import Intro         from './Intro';
+import Intro from './Intro/Intro';
 
 // Mount Intro (first visit per session only)
 const introContainer = document.getElementById('intro-root');
