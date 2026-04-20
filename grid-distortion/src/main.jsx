@@ -4,6 +4,7 @@ import Noise         from './Noise/Noise';
 import Crosshair     from './Crosshair/Crosshair';
 import Intro         from './Intro/Intro';
 
+// Mount Intro (first visit per session only)
 const introContainer = document.getElementById('intro-root');
 if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro-seen')) {
   introContainer._mounted = true;
@@ -17,6 +18,7 @@ if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro
   introRoot.render(<Intro onComplete={handleIntroComplete} />);
 }
 
+// Mount Noise globally
 const noiseContainer = document.getElementById('noise-root');
 if (noiseContainer && !noiseContainer._mounted) {
   noiseContainer._mounted = true;
@@ -25,6 +27,7 @@ if (noiseContainer && !noiseContainer._mounted) {
   );
 }
 
+// Mount Crosshair globally
 const crosshairContainer = document.getElementById('crosshair-root');
 if (crosshairContainer && !crosshairContainer._mounted) {
   crosshairContainer._mounted = true;
@@ -39,10 +42,10 @@ window.mountAll = function mountAll() {
     createRoot(archiveContainer).render(<ArchiveCanvas />);
   }
 
-  // Work — call global if available
+  // Work list — defined in global footer
   if (window.initWorkList) window.initWorkList();
 
-  // Studio — call global if available  
+  // Studio loop — defined in global footer
   if (window.initStudioLoop) window.initStudioLoop();
 };
 
