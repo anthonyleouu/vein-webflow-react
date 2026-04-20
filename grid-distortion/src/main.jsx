@@ -3,6 +3,8 @@ import ArchiveCanvas from './ArchiveCanvas/ArchiveCanvas';
 import Noise         from './Noise/Noise';
 import Crosshair     from './Crosshair/Crosshair';
 import Intro         from './Intro/Intro';
+import WorkList      from './WorkList/WorkList';
+import StudioLoop    from './StudioLoop/StudioLoop';
 
 // Mount Intro (first visit per session only)
 const introContainer = document.getElementById('intro-root');
@@ -10,13 +12,11 @@ if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro
   introContainer._mounted = true;
   document.body.classList.add('intro-active');
   const introRoot = createRoot(introContainer);
-
   const handleIntroComplete = () => {
     sessionStorage.setItem('intro-seen', '1');
     document.body.classList.remove('intro-active');
     document.documentElement.classList.add('intro-done');
   };
-
   introRoot.render(<Intro onComplete={handleIntroComplete} />);
 }
 
@@ -24,8 +24,7 @@ if (introContainer && !introContainer._mounted && !sessionStorage.getItem('intro
 const noiseContainer = document.getElementById('noise-root');
 if (noiseContainer && !noiseContainer._mounted) {
   noiseContainer._mounted = true;
-  const noiseRoot = createRoot(noiseContainer);
-  noiseRoot.render(
+  createRoot(noiseContainer).render(
     <Noise patternRefreshInterval={2} patternAlpha={25} />
   );
 }
@@ -34,16 +33,31 @@ if (noiseContainer && !noiseContainer._mounted) {
 const crosshairContainer = document.getElementById('crosshair-root');
 if (crosshairContainer && !crosshairContainer._mounted) {
   crosshairContainer._mounted = true;
-  const crosshairRoot = createRoot(crosshairContainer);
-  crosshairRoot.render(<Crosshair color="#ff2425" />);
+  createRoot(crosshairContainer).render(<Crosshair color="#ff2425" />);
 }
 
 window.mountAll = function mountAll() {
+  // ── Archive ───────────────────────────────────────────────────────────────
   const archiveContainer = document.getElementById('archive-root');
   if (archiveContainer && !archiveContainer._mounted) {
     archiveContainer._mounted = true;
-    const root = createRoot(archiveContainer);
-    root.render(<ArchiveCanvas />);
+    createRoot(archiveContainer).render(<ArchiveCanvas />);
+  }
+
+  // ── Work list ─────────────────────────────────────────────────────────────
+  const workContainer = document.getElementById('work-root');
+  if (workContainer) {
+    workContainer._mounted = false; // always remount on page enter
+    const workRoot = createRoot(workContainer);
+    workRoot.render(<WorkList />);
+  }
+
+  // ── Studio loop ───────────────────────────────────────────────────────────
+  const studioContainer = document.getElementById('studio-root');
+  if (studioContainer) {
+    studioContainer._mounted = false;
+    const studioRoot = createRoot(studioContainer);
+    studioRoot.render(<StudioLoop />);
   }
 };
 
