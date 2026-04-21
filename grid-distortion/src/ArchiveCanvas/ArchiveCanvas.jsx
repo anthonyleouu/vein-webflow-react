@@ -204,9 +204,20 @@ export default function ArchiveCanvas() {
       if (!scaledTile) return;
       const t    = scaledTile;
       scaledTile = null;
+
+      // ✅ Explicitly restore opacity on all tiles when unscaling
       clearDimmed();
-      if (!hoveredTile) clearInfo();
-      else tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
+      tiles.forEach(tile => {
+        tile.el.style.removeProperty('opacity');
+        tile.el.classList.remove('dimmed');
+      });
+
+      if (!hoveredTile) {
+        clearInfo();
+      } else {
+        tiles.forEach(tt => tt.el.classList.toggle('dimmed', tt !== hoveredTile));
+      }
+
       t.returning = true;
       t.el.style.transform = `translate(${t.curX}px,${t.curY}px) scale(${t.defaultScale})`;
       t.el.classList.remove('scaled');
