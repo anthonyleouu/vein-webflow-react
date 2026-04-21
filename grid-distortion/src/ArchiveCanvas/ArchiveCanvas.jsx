@@ -12,11 +12,10 @@ export default function ArchiveCanvas() {
     const titleEl  = document.getElementById('archive-title');
     const descEl   = document.getElementById('archive-desc');
 
-    // Clear text and remove any inline opacity set by barba enter hook
+    // Just clear any leftover text — CSS in head handles opacity
     [numberEl, titleEl, descEl].forEach(el => {
       if (!el) return;
       el.textContent = '';
-      el.style.removeProperty('opacity');
     });
 
     const style = document.createElement('style');
@@ -155,7 +154,7 @@ export default function ArchiveCanvas() {
 
     function animateInfo(el, text) {
       if (!el || !text) return;
-      el.style.removeProperty('opacity'); // ✅ remove inline !important before class takes over
+      // Reset to plain text so getLines can measure correctly
       el.innerHTML = text;
       el.classList.add('info-visible');
       if (window.revealText) window.revealText(el);
@@ -206,9 +205,10 @@ export default function ArchiveCanvas() {
       const t    = scaledTile;
       scaledTile = null;
 
-      // ✅ Remove inline opacity and dimmed class from all tiles
+      // ✅ Explicitly restore opacity on all tiles when unscaling
+      clearDimmed();
       tiles.forEach(tile => {
-        tile.el.style.opacity = '1';
+        tile.el.style.removeProperty('opacity');
         tile.el.classList.remove('dimmed');
       });
 
