@@ -208,7 +208,7 @@ export default function ArchiveCanvas() {
 
       // ✅ Remove inline opacity and dimmed class from all tiles
       tiles.forEach(tile => {
-        tile.el.style.removeProperty('opacity');
+        tile.el.style.opacity = '1';
         tile.el.classList.remove('dimmed');
       });
 
